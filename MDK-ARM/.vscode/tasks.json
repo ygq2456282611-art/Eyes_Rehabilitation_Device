@@ -1,0 +1,66 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build (Keil MDK)",
+            "type": "shell",
+            "command": "C:\\Keil_v5\\UV4.exe",
+            "args": [
+                "-b",
+                "${workspaceFolder}/CtrBoard-H7_IMU.uvprojx",
+                "-j0",
+                "-o",
+                "${workspaceFolder}/build.log"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Clean (Keil MDK)",
+            "type": "shell",
+            "command": "C:\\Keil_v5\\UV4.exe",
+            "args": [
+                "-c",
+                "${workspaceFolder}/CtrBoard-H7_IMU.uvprojx",
+                "-j0",
+                "-o",
+                "${workspaceFolder}/build.log"
+            ],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Rebuild (Keil MDK)",
+            "type": "shell",
+            "command": "C:\\Keil_v5\\UV4.exe",
+            "args": [
+                "-r",
+                "${workspaceFolder}/CtrBoard-H7_IMU.uvprojx",
+                "-j0",
+                "-o",
+                "${workspaceFolder}/build.log"
+            ],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        }
+    ]
+}

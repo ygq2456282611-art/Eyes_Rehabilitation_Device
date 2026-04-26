@@ -1,0 +1,90 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "STM32H723 - ST-Link (OpenOCD)",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/CtrBoard-H7_IMU/CtrBoard-H7_IMU.elf",
+            "request": "launch",
+            "type": "cortex-debug",
+            "runToEntryPoint": "main",
+            "servertype": "openocd",
+            "openocdConfig": "${workspaceFolder}/.vscode/stm32h7.cfg",
+            "device": "STM32H723VG",
+            "interface": "swd",
+            "serialNumber": "",
+            "armToolchainPath": "",
+            "objdumpPath": "arm-none-eabi-objdump",
+            "searchDir": [],
+            "preLaunchTask": "",
+            "postRestartCommands": [],
+            "postInitCommands": [
+                "monitor reset halt",
+                "load",
+                "continue"
+            ],
+            "preLaunchCommands": [
+                "define hook-quit",
+                "quit",
+                "end"
+            ],
+            "svdFile": "",
+            "svdAddrOffset": "0x0",
+            "swVtoHardVtx": false,
+            "graphConfig": [],
+            "showDevDebugOutput": false,
+            "trace": false,
+            "traceShowSourceLocation": false,
+            "watch": [
+                "gyro[0]",
+                "gyro[1]",
+                "gyro[2]"
+            ],
+            "valuesFormatting": "auto"
+        },
+        {
+            "name": "STM32H723 - ST-Link (ST-Util)",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/CtrBoard-H7_IMU/CtrBoard-H7_IMU.elf",
+            "request": "launch",
+            "type": "cortex-debug",
+            "runToEntryPoint": "main",
+            "servertype": "st-util",
+            "device": "STM32H723VG",
+            "interface": "swd",
+            "serialNumber": "",
+            "armToolchainPath": "",
+            "objdumpPath": "arm-none-eabi-objdump",
+            "postInitCommands": [
+                "load",
+                "continue"
+            ],
+            "svdFile": "",
+            "watch": [
+                "main_var1",
+                "main_var2"
+            ],
+            "valuesFormatting": "auto"
+        },
+        {
+            "name": "STM32H723 - Keil ULINK2",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/CtrBoard-H7_IMU/CtrBoard-H7_IMU.elf",
+            "request": "launch",
+            "type": "cortex-debug",
+            "runToEntryPoint": "main",
+            "servertype": "st-util",
+            "device": "STM32H723VG",
+            "interface": "swd",
+            "armToolchainPath": "",
+            "objdumpPath": "arm-none-eabi-objdump",
+            "postInitCommands": [
+                "load"
+            ],
+            "watch": [
+                "main_var1"
+            ],
+            "valuesFormatting": "auto"
+        }
+    ]
+}
