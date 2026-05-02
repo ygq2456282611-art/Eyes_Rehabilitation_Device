@@ -4,6 +4,10 @@
 #include <math.h>
 
 
+
+
+static void BMI088_read_muli_reg(uint8_t reg, uint8_t *buf, uint8_t len);
+
 float BMI088_ACCEL_SEN = BMI088_ACCEL_3G_SEN;
 float BMI088_GYRO_SEN = BMI088_GYRO_2000_SEN;
 
@@ -16,6 +20,72 @@ static const float PI = 3.14159265358979f;
 static const uint16_t GYRO_CALIBRATION_SAMPLES = 100;  // 零点校准采样次数
 static uint8_t is_calibrated = 0;  // 校准标志
 
+// Kalman filter state for angle estimation (angle + bias)
+typedef struct {
+    float angle;   // estimated angle
+    float bias;    // estimated gyro bias
+    float P[2][2]; // error covariance
+    float Q_angle; // process noise variance for the angle
+    float Q_bias;  // process noise variance for the gyro bias
+    float R_measure; // measurement noise variance
+} Kalman_t;
+
+static Kalman_t kalman_pitch;
+static Kalman_t kalman_roll;
+
+// 默认噪声参数，可根据实际调整
+static const float KALMAN_Q_ANGLE = 0.001f;
+static const float KALMAN_Q_BIAS = 0.003f;
+static const float KALMAN_R_MEASURE = 0.03f;
+
+static void BMI088_kalman_init(Kalman_t *k)
+{
+    k->angle = 0.0f;
+    k->bias = 0.0f;
+    k->P[0][0] = 0.0f; k->P[0][1] = 0.0f;
+    k->P[1][0] = 0.0f; k->P[1][1] = 0.0f;
+    k->Q_angle = KALMAN_Q_ANGLE;
+    k->Q_bias = KALMAN_Q_BIAS;
+    k->R_measure = KALMAN_R_MEASURE;
+}
+
+// 卡尔曼滤波器更新：以陀螺仪角速度（deg/s）和加速度角度测量（deg）更新
+static float BMI088_kalman_update(Kalman_t *k, float newRate, float newAngle, float dt)
+{
+    // Predict
+    // State transition: angle += (newRate - bias) * dt
+    float rate = newRate - k->bias;
+    k->angle += dt * rate;
+
+    // Update error covariance: P = A*P*A' + Q
+    k->P[0][0] += dt * (dt*k->P[1][1] - k->P[0][1] - k->P[1][0] + k->Q_angle);
+    k->P[0][1] -= dt * k->P[1][1];
+    k->P[1][0] -= dt * k->P[1][1];
+    k->P[1][1] += k->Q_bias * dt;
+
+    // Compute Kalman gain
+    float S = k->P[0][0] + k->R_measure; // Estimate error
+    float K0 = k->P[0][0] / S;
+    float K1 = k->P[1][0] / S;
+
+    // Update estimate with measurement
+    float y = newAngle - k->angle;
+    k->angle += K0 * y;
+    k->bias += K1 * y;
+
+    // Update error covariance: P = (I - K*H) * P
+    float P00 = k->P[0][0];
+    float P01 = k->P[0][1];
+    float P10 = k->P[1][0];
+    float P11 = k->P[1][1];
+
+    k->P[0][0] = P00 - K0 * P00;
+    k->P[0][1] = P01 - K0 * P01;
+    k->P[1][0] = P10 - K1 * P00;
+    k->P[1][1] = P11 - K1 * P01;
+
+    return k->angle;
+}
 /**
  * @brief 角度归一化到 -180° 到 +180° 范围
  * @param angle 输入角度
@@ -41,7 +111,9 @@ static void BMI088_gyro_calibration(void)
     // 采样多次求平均
     for(uint16_t i = 0; i < GYRO_CALIBRATION_SAMPLES; i++)
     {
-        BMI088_gyro_read_muli_reg(BMI088_GYRO_CHIP_ID, buf, 8);
+        BMI088_GYRO_NS_L();
+        BMI088_read_muli_reg(BMI088_GYRO_CHIP_ID, buf, 8);
+        BMI088_GYRO_NS_H();
         if(buf[0] == BMI088_GYRO_CHIP_ID_VALUE)
         {
             bmi088_raw_temp = (int16_t)((buf[3]) << 8) | buf[2];
@@ -76,6 +148,9 @@ void BMI088_euler_init(void)
     
     // 进行陀螺仪零点校准（确保设备静止）
     BMI088_gyro_calibration();
+    // 初始化卡尔曼滤波器
+    BMI088_kalman_init(&kalman_pitch);
+    BMI088_kalman_init(&kalman_roll);
 }
 
 /**
@@ -103,33 +178,25 @@ static void BMI088_update_euler(float gyro[3], float accel[3], float dt)
 {
     float accel_pitch, accel_roll;
     
-    // 1. 从加速度计计算当前的pitch和roll（仅用于互补滤波）
+    // 1. 从加速度计计算当前的pitch和roll（用于测量更新）
     BMI088_accel_to_angle(accel, &accel_pitch, &accel_roll);
-    
-    // 2. 陀螺仪积分更新欧拉角（短期精确）
+
+    // 2. 使用卡尔曼滤波器对 pitch/roll 进行融合
     if(is_calibrated)
     {
-        euler_angle.pitch += (gyro[0] - gyro_offset[0]) * dt;
-        euler_angle.roll += (gyro[1] - gyro_offset[1]) * dt;
-        euler_angle.yaw += (gyro[2] - gyro_offset[2]) * dt;
+        euler_angle.pitch = BMI088_kalman_update(&kalman_pitch, gyro[0] - gyro_offset[0], accel_pitch, dt);
+        euler_angle.roll  = BMI088_kalman_update(&kalman_roll,  gyro[1] - gyro_offset[1], accel_roll,  dt);
+        euler_angle.yaw  += (gyro[2] - gyro_offset[2]) * dt; // yaw 仍通过陀螺仪积分
     }
     else
     {
-        // 未校准时不进行积分
+        // 校准前使用原始陀螺仪积分以避免偏差
         euler_angle.pitch += gyro[0] * dt;
-        euler_angle.roll += gyro[1] * dt;
-        euler_angle.yaw += gyro[2] * dt;
+        euler_angle.roll  += gyro[1] * dt;
+        euler_angle.yaw   += gyro[2] * dt;
     }
-    
-    // 3. 互补滤波：融合加速度计和陀螺仪数据
-    // 加速度计用于长期漂移补偿（alpha越大越信任陀螺仪）
-    euler_angle.pitch = COMPLEMENTARY_FILTER_ALPHA * euler_angle.pitch + 
-                        (1.0f - COMPLEMENTARY_FILTER_ALPHA) * accel_pitch;
-    euler_angle.roll = COMPLEMENTARY_FILTER_ALPHA * euler_angle.roll + 
-                       (1.0f - COMPLEMENTARY_FILTER_ALPHA) * accel_roll;
-    
-    // yaw无法通过加速度计得到，只能依赖陀螺仪（需要磁力计补偿长期漂移）
-    // 归一化yaw到 -180° 到 +180° 范围
+
+    // 归一化 yaw 到 -180° 到 +180° 范围
     euler_angle.yaw = BMI088_normalize_angle(euler_angle.yaw);
 }
 

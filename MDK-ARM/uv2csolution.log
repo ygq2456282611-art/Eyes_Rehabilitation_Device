@@ -1,13 +1,13 @@
-0 out of 1 target(s) converted
+1 out of 1 target(s) converted
 
-Error: 1 error(s), 0 warning(s):
+Created solution: D:/Keil_v5/CtrBoard-H7_IMU/MDK-ARM/CtrBoard-H7_IMU.csolution.yml
 
-Errors:
+With projects:
 
-	The target "CtrBoard-H7_IMU" is configured to use Arm Compiler 5.
+- D:/Keil_v5/CtrBoard-H7_IMU/MDK-ARM/CtrBoard-H7_IMU.cproject.yml
 
-	CMSIS csolution projects support Arm Compiler 6 only.
+Error: 0 error(s), 1 warning(s):
 
-	For details on how to manually migrate to AC6, see
+Warnings:
 
-	https://developer.arm.com/documentation/100068/0621/Migrating-from-Arm-Compiler-5-to-Arm-Compiler-for-Embedded-6
+	Target name changed from 'CtrBoard-H7_IMU' to 'CtrBoard_H7_IMU'

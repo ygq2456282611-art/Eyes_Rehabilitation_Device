@@ -1,0 +1,37 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "D:/Keil_v5/CtrBoard-H7_IMU/MDK-ARM/tmp/CMakeFiles/CtrBoard-H7_IMU+CtrBoard_H7_IMU-database"
+		},
+		{
+			"file" : "D:/Keil_v5/CtrBoard-H7_IMU/MDK-ARM/tmp/CMakeFiles/CtrBoard-H7_IMU+CtrBoard_H7_IMU-database.rule"
+		},
+		{
+			"file" : "D:/Keil_v5/CtrBoard-H7_IMU/MDK-ARM/tmp/CtrBoard-H7_IMU+CtrBoard_H7_IMU/src/CtrBoard-H7_IMU+CtrBoard_H7_IMU-stamp/CtrBoard-H7_IMU+CtrBoard_H7_IMU-database.rule"
+		},
+		{
+			"file" : "D:/Keil_v5/CtrBoard-H7_IMU/MDK-ARM/tmp/CtrBoard-H7_IMU+CtrBoard_H7_IMU/src/CtrBoard-H7_IMU+CtrBoard_H7_IMU-stamp/CtrBoard-H7_IMU+CtrBoard_H7_IMU-configure.rule"
+		},
+		{
+			"file" : "D:/Keil_v5/CtrBoard-H7_IMU/MDK-ARM/tmp/CtrBoard-H7_IMU+CtrBoard_H7_IMU/src/CtrBoard-H7_IMU+CtrBoard_H7_IMU-stamp/CtrBoard-H7_IMU+CtrBoard_H7_IMU-patch.rule"
+		},
+		{
+			"file" : "D:/Keil_v5/CtrBoard-H7_IMU/MDK-ARM/tmp/CtrBoard-H7_IMU+CtrBoard_H7_IMU/src/CtrBoard-H7_IMU+CtrBoard_H7_IMU-stamp/CtrBoard-H7_IMU+CtrBoard_H7_IMU-update.rule"
+		},
+		{
+			"file" : "D:/Keil_v5/CtrBoard-H7_IMU/MDK-ARM/tmp/CtrBoard-H7_IMU+CtrBoard_H7_IMU/src/CtrBoard-H7_IMU+CtrBoard_H7_IMU-stamp/CtrBoard-H7_IMU+CtrBoard_H7_IMU-download.rule"
+		},
+		{
+			"file" : "D:/Keil_v5/CtrBoard-H7_IMU/MDK-ARM/tmp/CtrBoard-H7_IMU+CtrBoard_H7_IMU/src/CtrBoard-H7_IMU+CtrBoard_H7_IMU-stamp/CtrBoard-H7_IMU+CtrBoard_H7_IMU-mkdir.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"CtrBoard-H7_IMU+CtrBoard_H7_IMU"
+		],
+		"name" : "CtrBoard-H7_IMU+CtrBoard_H7_IMU-database"
+	}
+}
