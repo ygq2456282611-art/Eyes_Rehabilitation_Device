@@ -68,6 +68,21 @@ void Error_Handler(void);
 
 /* USER CODE BEGIN Private defines */
 
+#define LASER_Pin       GPIO_PIN_2
+#define LASER_GPIO_Port GPIOD
+
+#define LED_FOCUS_Pin       GPIO_PIN_8
+#define LED_FOCUS_GPIO_Port GPIOB
+#define LED_STATUS_Pin       GPIO_PIN_9
+#define LED_STATUS_GPIO_Port GPIOB
+
+#define KEY_MODE_Pin       GPIO_PIN_15
+#define KEY_MODE_GPIO_Port GPIOD
+#define KEY_CONFIRM_Pin       GPIO_PIN_14
+#define KEY_CONFIRM_GPIO_Port GPIOD
+#define KEY_BACK_Pin       GPIO_PIN_14
+#define KEY_BACK_GPIO_Port GPIOE
+
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

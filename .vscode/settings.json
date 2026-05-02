@@ -1,5 +1,6 @@
 {
     "python.analysis.extraPaths": [
         "c:\\Users\\albert\\.vcpkg\\artifacts\\2139c4c6\\debuggers.arm.armdbg\\6.9.0\\sw\\osgi\\plugins\\com.arm.debug.interpreter.jython.api_6.9.0.202604091206"
-    ]
+    ],
+    "cmake.sourceDirectory": "D:/Keil_v5/Eyes_Rehabilitation_Device/MDK-ARM/tmp"
 }

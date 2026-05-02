@@ -112,8 +112,7 @@ typedef enum
     #define __weak  __attribute__((weak))
   #endif
   #ifndef __packed
-
-									#define __packed  __attribute__((packed))
+    #define __packed  __attribute__((packed))
   #endif
 #elif defined ( __GNUC__ ) && !defined (__CC_ARM) /* GNU Compiler */
   #ifndef __weak

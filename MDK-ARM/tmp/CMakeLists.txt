@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.27)
 include(ExternalProject)
 	
-project("CtrBoard-H7_IMU" NONE)
+project("Eyes_Rehabilitation_Device" NONE)
 
 # Enable color diagnostics
 set(CMAKE_COLOR_DIAGNOSTICS ON)
@@ -11,7 +11,7 @@ include("roots.cmake")
 
 # Context specific lists
 set(CONTEXTS
-  "CtrBoard-H7_IMU+CtrBoard_H7_IMU"
+  "Eyes_Rehabilitation_Device+CtrBoard_H7_IMU"
 )
 list(LENGTH CONTEXTS CONTEXTS_LENGTH)
 math(EXPR CONTEXTS_LENGTH "${CONTEXTS_LENGTH}-1")
@@ -21,12 +21,12 @@ set(COMPILERS
 )
 
 set(DIRS
-  "${CMAKE_CURRENT_SOURCE_DIR}/CtrBoard-H7_IMU+CtrBoard_H7_IMU"
+  "${CMAKE_CURRENT_SOURCE_DIR}/Eyes_Rehabilitation_Device+CtrBoard_H7_IMU"
 )
 
 set(OUTPUTS_1
-  "${SOLUTION_ROOT}/out/CtrBoard-H7_IMU/CtrBoard_H7_IMU/CtrBoard-H7_IMU.axf"
-  "${SOLUTION_ROOT}/out/CtrBoard-H7_IMU/CtrBoard_H7_IMU/compile_commands.json"
+  "${SOLUTION_ROOT}/out/Eyes_Rehabilitation_Device/CtrBoard_H7_IMU/Eyes_Rehabilitation_Device.axf"
+  "${SOLUTION_ROOT}/out/Eyes_Rehabilitation_Device/CtrBoard_H7_IMU/compile_commands.json"
 )
 
 set(ARGS

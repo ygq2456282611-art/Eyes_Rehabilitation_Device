@@ -1,0 +1,14 @@
+solution:
+  created-by: uv2csolution@1.6.0
+  created-for: CMSIS-Toolbox@2.12.0
+  compiler: AC6
+  target-types:
+    - type: CtrBoard_H7_IMU
+      device: STM32H723VGTx
+      optimize: debug
+      target-set:
+        - set:
+          images:
+            - project-context: Eyes_Rehabilitation_Device
+  projects:
+    - project: Eyes_Rehabilitation_Device.cproject.yml

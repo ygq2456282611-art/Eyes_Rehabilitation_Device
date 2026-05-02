@@ -1,8 +1,8 @@
-# Install script for directory: D:/Keil_v5/CtrBoard-H7_IMU/MDK-ARM/tmp/CtrBoard-H7_IMU+CtrBoard_H7_IMU
+# Install script for directory: D:/Keil_v5/Eyes_Rehabilitation_Device/MDK-ARM/tmp/Eyes_Rehabilitation_Device+CtrBoard_H7_IMU
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
-  set(CMAKE_INSTALL_PREFIX "C:/Program Files (x86)/CtrBoard-H7_IMU+CtrBoard_H7_IMU")
+  set(CMAKE_INSTALL_PREFIX "C:/Program Files (x86)/Eyes_Rehabilitation_Device+CtrBoard_H7_IMU")
 endif()
 string(REGEX REPLACE "/$" "" CMAKE_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
 
@@ -40,7 +40,7 @@ endif()
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
 if(CMAKE_INSTALL_LOCAL_ONLY)
-  file(WRITE "D:/Keil_v5/CtrBoard-H7_IMU/MDK-ARM/tmp/1/install_local_manifest.txt"
+  file(WRITE "D:/Keil_v5/Eyes_Rehabilitation_Device/MDK-ARM/tmp/1/install_local_manifest.txt"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")
 endif()
 if(CMAKE_INSTALL_COMPONENT)
@@ -56,6 +56,6 @@ else()
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
-  file(WRITE "D:/Keil_v5/CtrBoard-H7_IMU/MDK-ARM/tmp/1/${CMAKE_INSTALL_MANIFEST}"
+  file(WRITE "D:/Keil_v5/Eyes_Rehabilitation_Device/MDK-ARM/tmp/1/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")
 endif()

@@ -1,0 +1,236 @@
+build:
+  generated-by: csolution version 2.13.0+p3-g40b6564e
+  solution: ../../../Eyes_Rehabilitation_Device.csolution.yml
+  project: ../../../Eyes_Rehabilitation_Device.cproject.yml
+  context: Eyes_Rehabilitation_Device+CtrBoard_H7_IMU
+  compiler: AC6
+  device: STMicroelectronics::STM32H723VGTx
+  device-pack: Keil::STM32H7xx_DFP@4.1.3
+  device-books:
+    - name: https://developer.arm.com/documentation/dui0646/latest
+      title: Cortex-M7 Generic User Guide
+    - name: https://www.st.com/resource/en/reference_manual/rm0468-stm32h723733-stm32h725735-and-stm32h730-value-line-advanced-armbased-32bit-mcus-stmicroelectronics.pdf
+      title: STM32H723/733, STM32H725/735 and STM32H730 Value line Reference Manual
+    - name: https://www.st.com/resource/en/datasheet/stm32h723zg.pdf
+      title: STM32H723VE STM32H723VG STM32H723ZE STM32H723ZG Data Sheet
+  dbgconf:
+    - file: ../../../.cmsis/Eyes_Rehabilitation_Device+CtrBoard_H7_IMU.dbgconf
+      version: 1.0.2
+  processor:
+    dsp: on
+    endian: little
+    fpu: dp
+    core: Cortex-M7
+  packs:
+    - pack: ARM::CMSIS@6.3.0
+      path: ${CMSIS_PACK_ROOT}/ARM/CMSIS/6.3.0
+    - pack: Keil::STM32H7xx_DFP@4.1.3
+      path: ${CMSIS_PACK_ROOT}/Keil/STM32H7xx_DFP/4.1.3
+  optimize: debug
+  debug: on
+  misc:
+    ASM:
+      - -masm=auto
+    C:
+      - -std=c99
+      - -fno-rtti
+      - -funsigned-char
+      - -fshort-enums
+      - -fshort-wchar
+      - -ffunction-sections
+      - -Wno-packed
+      - -Wno-missing-variable-declarations
+      - -Wno-missing-prototypes
+      - -Wno-missing-noreturn
+      - -Wno-sign-conversion
+      - -Wno-nonportable-include-path
+      - -Wno-reserved-id-macro
+      - -Wno-unused-macros
+      - -Wno-documentation-unknown-command
+      - -Wno-documentation
+      - -Wno-license-management
+      - -Wno-parentheses-equality
+    CPP:
+      - -xc++
+      - -std=c++11
+      - -fno-exceptions
+      - -fno-rtti
+      - -funsigned-char
+      - -fshort-enums
+      - -fshort-wchar
+      - -ffunction-sections
+      - -Wno-packed
+      - -Wno-missing-variable-declarations
+      - -Wno-missing-prototypes
+      - -Wno-missing-noreturn
+      - -Wno-sign-conversion
+      - -Wno-nonportable-include-path
+      - -Wno-reserved-id-macro
+      - -Wno-unused-macros
+      - -Wno-documentation-unknown-command
+      - -Wno-documentation
+      - -Wno-license-management
+      - -Wno-parentheses-equality
+    Link:
+      - --library_type=microlib
+      - --map
+      - --load_addr_map_info
+      - --xref
+      - --callgraph
+      - --symbols
+      - --info sizes
+      - --info totals
+      - --info unused
+      - --info veneers
+      - --strict
+      - --summary_stderr
+      - --info summarysizes
+  define:
+    - USE_HAL_DRIVER
+    - STM32H723xx
+    - __MICROLIB
+    - STM32H723xx
+    - _RTE_
+  define-asm:
+    - __MICROLIB
+    - STM32H723xx
+    - _RTE_
+  add-path:
+    - ../../../../Core/Inc
+    - ../../../../Drivers/STM32H7xx_HAL_Driver/Inc
+    - ../../../../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy
+    - ../../../../Drivers/CMSIS/Device/ST/STM32H7xx/Include
+    - ../../../../Drivers/CMSIS/Include
+    - ../../../../Device/BMI088/inc
+    - ../../../../Device/BMI088
+    - ../../../RTE/_CtrBoard_H7_IMU
+    - ${CMSIS_PACK_ROOT}/ARM/CMSIS/6.3.0/CMSIS/Core/Include
+  add-path-asm:
+    - ../../../RTE/_CtrBoard_H7_IMU
+    - ${CMSIS_PACK_ROOT}/ARM/CMSIS/6.3.0/CMSIS/Core/Include
+  output-dirs:
+    intdir: ../../../tmp
+    outdir: .
+    rtedir: ../../../RTE
+  output:
+    - type: elf
+      file: Eyes_Rehabilitation_Device.axf
+    - type: comp-db
+      file: compile_commands.json
+  components:
+    - component: ARM::CMSIS:CORE@6.2.0
+      condition: ARMv6_7_8-M Device
+      from-pack: ARM::CMSIS@6.3.0
+      selected-by: ARM::CMSIS:CORE
+      files:
+        - file: ${CMSIS_PACK_ROOT}/ARM/CMSIS/6.3.0/CMSIS/Core/Include
+          category: include
+          version: 6.2.0
+        - file: ${CMSIS_PACK_ROOT}/ARM/CMSIS/6.3.0/CMSIS/Core/Include/tz_context.h
+          category: header
+          version: 6.2.0
+        - file: ${CMSIS_PACK_ROOT}/ARM/CMSIS/6.3.0/CMSIS/Core/Template/ARMv8-M/main_s.c
+          category: sourceC
+          attr: template
+          version: 1.1.1
+          select: Secure mode 'main' module for ARMv8-M
+        - file: ${CMSIS_PACK_ROOT}/ARM/CMSIS/6.3.0/CMSIS/Core/Template/ARMv8-M/tz_context.c
+          category: sourceC
+          attr: template
+          version: 1.1.1
+          select: RTOS Context Management (TrustZone for ARMv8-M)
+        - file: ${CMSIS_PACK_ROOT}/ARM/CMSIS/6.3.0/CMSIS/Documentation/html/Core/index.html
+          category: doc
+          version: 6.2.0
+  linker:
+    script: ../../../Eyes_Rehabilitation_Device_CtrBoard_H7_IMU.sct
+  groups:
+    - group: Application/MDK-ARM
+      files:
+        - file: ../../../startup_stm32h723xx.s
+          category: sourceAsm
+          misc:
+            ASM:
+              - -masm=auto
+              - -x assembler
+    - group: Application/User/Core
+      files:
+        - file: ../../../../Core/Src/main.c
+          category: sourceC
+        - file: ../../../../Core/Src/gpio.c
+          category: sourceC
+        - file: ../../../../Core/Src/dma.c
+          category: sourceC
+        - file: ../../../../Core/Src/spi.c
+          category: sourceC
+        - file: ../../../../Core/Src/stm32h7xx_it.c
+          category: sourceC
+        - file: ../../../../Core/Src/stm32h7xx_hal_msp.c
+          category: sourceC
+    - group: Drivers/STM32H7xx_HAL_Driver
+      files:
+        - file: ../../../../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_cortex.c
+          category: sourceC
+        - file: ../../../../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_rcc.c
+          category: sourceC
+        - file: ../../../../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_rcc_ex.c
+          category: sourceC
+        - file: ../../../../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_flash.c
+          category: sourceC
+        - file: ../../../../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_flash_ex.c
+          category: sourceC
+        - file: ../../../../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_gpio.c
+          category: sourceC
+        - file: ../../../../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_hsem.c
+          category: sourceC
+        - file: ../../../../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_dma.c
+          category: sourceC
+        - file: ../../../../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_dma_ex.c
+          category: sourceC
+        - file: ../../../../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_mdma.c
+          category: sourceC
+        - file: ../../../../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_pwr.c
+          category: sourceC
+        - file: ../../../../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_pwr_ex.c
+          category: sourceC
+        - file: ../../../../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal.c
+          category: sourceC
+        - file: ../../../../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_i2c.c
+          category: sourceC
+        - file: ../../../../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_i2c_ex.c
+          category: sourceC
+        - file: ../../../../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_exti.c
+          category: sourceC
+        - file: ../../../../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_spi.c
+          category: sourceC
+        - file: ../../../../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_spi_ex.c
+          category: sourceC
+        - file: ../../../../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_tim.c
+          category: sourceC
+        - file: ../../../../Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_tim_ex.c
+          category: sourceC
+    - group: Drivers/CMSIS
+      files:
+        - file: ../../../../Core/Src/system_stm32h7xx.c
+          category: sourceC
+    - group: Device
+      files:
+        - file: ../../../../Device/BMI088/BMI088driver.c
+          category: sourceC
+        - file: ../../../../Device/BMI088/BMI088Middleware.c
+          category: sourceC
+        - file: ../../../../Device/BMI088/inc/BMI088reg.h
+          category: header
+  constructed-files:
+    - file: ../../../RTE/_CtrBoard_H7_IMU/RTE_Components.h
+      category: header
+  licenses:
+    - license: Apache-2.0
+      packs:
+        - pack: ARM::CMSIS@6.3.0
+        - pack: Keil::STM32H7xx_DFP@4.1.3
+      components:
+        - component: ARM::CMSIS:CORE@6.2.0
+    - license: BSD-3-Clause
+      packs:
+        - pack: Keil::STM32H7xx_DFP@4.1.3

@@ -1,0 +1,19 @@
+build-idx:
+  generated-by: csolution version 2.13.0+p3-g40b6564e
+  csolution: Eyes_Rehabilitation_Device.csolution.yml
+  cbuild-run: out/Eyes_Rehabilitation_Device+CtrBoard_H7_IMU.cbuild-run.yml
+  tmpdir: tmp
+  cprojects:
+    - cproject: Eyes_Rehabilitation_Device.cproject.yml
+  cbuilds:
+    - cbuild: out/Eyes_Rehabilitation_Device/CtrBoard_H7_IMU/Eyes_Rehabilitation_Device+CtrBoard_H7_IMU.cbuild.yml
+      project: Eyes_Rehabilitation_Device
+      configuration: +CtrBoard_H7_IMU
+      messages:
+        info:
+          - Eyes_Rehabilitation_Device.cbuild-pack.yml - file is already up-to-date
+          - Eyes_Rehabilitation_Device+CtrBoard_H7_IMU.cbuild-run.yml - file is already up-to-date
+          - Eyes_Rehabilitation_Device+CtrBoard_H7_IMU.cbuild.yml - file is already up-to-date
+      packs-unused:
+        - pack: ARM::CMSIS-DSP@1.17.0
+        - pack: ARM::CMSIS-NN@4.1.0

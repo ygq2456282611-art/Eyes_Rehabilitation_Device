@@ -20,11 +20,20 @@
 #include "main.h"
 #include "dma.h"
 #include "spi.h"
+#include "tim.h"
+#include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "BMI088driver.h"
+#include "servo.h"
+#include "voice.h"
+#include "laser.h"
+#include "key.h"
+#include "led.h"
+#include "head_tracker.h"
+#include "train_modes.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -90,13 +99,25 @@ int main(void)
   MX_GPIO_Init();
   MX_DMA_Init();
   MX_SPI2_Init();
+  MX_TIM1_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
     while(BMI088_init())
     {
         ;
     }
-    BMI088_euler_init();  // 初始化欧拉角计算模块（包含陀螺仪零点校准，请保持设备静止）
-    HAL_Delay(2000);      // 等待校准完成（2秒）
+
+    Servo_Init();
+    Voice_Init();
+    Laser_Init();
+    Key_Init();
+    LED_Init();
+    HeadTracker_Init();
+    App_Init();
+
+    Laser_Blink(200, 3);
+    Voice_PlayText("系统初始化完成");
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -107,11 +128,9 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
         BMI088_read_euler(&euler_angle, &temp);
-        // 现在 euler_angle.pitch, euler_angle.roll, euler_angle.yaw 包含欧拉角数据
-        // euler_angle.pitch   - 俯仰角 (单位: 度)
-        // euler_angle.roll    - 翻滚角 (单位: 度)
-        // euler_angle.yaw     - 偏航角 (单位: 度)
-        // temp                - 温度 (单位: °C)
+        HeadTracker_Update(&euler_angle, 0.01f);
+        Key_Scan();
+        App_Run(&euler_angle, temp);
         HAL_Delay(10);
   }
   /* USER CODE END 3 */

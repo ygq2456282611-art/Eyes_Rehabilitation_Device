@@ -10,6 +10,13 @@
                 "d:\\Keil_v5\\CtrBoard-H7_IMU\\Drivers\\CMSIS\\Include",
                 "d:\\Keil_v5\\CtrBoard-H7_IMU\\Device\\BMI088\\inc",
                 "d:\\Keil_v5\\CtrBoard-H7_IMU\\Device\\BMI088",
+                "d:\\Keil_v5\\CtrBoard-H7_IMU\\Device\\HeadTracker",
+                "d:\\Keil_v5\\CtrBoard-H7_IMU\\Device\\Key",
+                "d:\\Keil_v5\\CtrBoard-H7_IMU\\Device\\Laser",
+                "d:\\Keil_v5\\CtrBoard-H7_IMU\\Device\\LED",
+                "d:\\Keil_v5\\CtrBoard-H7_IMU\\Device\\Servo",
+                "d:\\Keil_v5\\CtrBoard-H7_IMU\\Device\\Voice",
+                "d:\\Keil_v5\\CtrBoard-H7_IMU\\App",
                 "d:\\Keil_v5\\CtrBoard-H7_IMU\\MDK-ARM",
                 "d:\\Keil_v5\\CtrBoard-H7_IMU\\Core\\Src",
                 "d:\\Keil_v5\\CtrBoard-H7_IMU\\Drivers\\STM32H7xx_HAL_Driver\\Src"
