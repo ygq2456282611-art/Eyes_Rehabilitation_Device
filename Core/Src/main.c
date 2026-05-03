@@ -1,4 +1,4 @@
-/* USER CODE BEGIN Header */
+﻿/* USER CODE BEGIN Header */
 /**
   ******************************************************************************
   * @file           : main.c
@@ -116,7 +116,7 @@ int main(void)
     App_Init();
 
     Laser_Blink(200, 3);
-    Voice_PlayText("系统初始化完成");
+    Voice_Play(0xFF, VOICE_TTS_INIT_OK);
 
   /* USER CODE END 2 */
 

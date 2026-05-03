@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file    train_modes.c
  * @brief   训练模式状态机 + 五种临床训练模式实现
  *          状态机：IDLE → CALIBRATE → TRAIN → FEEDBACK → IDLE
@@ -30,7 +30,7 @@ static uint8_t         menu_index   = 0;
 
 /* 训练模式的中文名称（用于语音播报菜单） */
 static const char *mode_names[MODE_COUNT] = {
-    "A-注视训练", "B-扫视训练", "C-追踪训练", "D-聚焦训练", "E-忽略训练"
+    "A", "B", "C", "D", "E"
 };
 
 /* ===== 扫视训练用变量 ===== */
@@ -131,13 +131,7 @@ static void App_State_Idle(void)
     {
         train_mode = (TrainMode_t)((menu_index + 1) % MODE_COUNT);
         menu_index++;
-        Voice_PlayText(mode_names[train_mode]);
-    }
-
-    if (Key_GetEvent(KEY_CONFIRM) == KEY_EVENT_SHORT)
-    {
-        LED_On(LED_FOCUS);
-        Voice_PlayText(mode_names[train_mode]);
+Voice_Play(0x00, VOICE_CMD_FIXATION + (uint8_t)train_mode);
         HAL_Delay(800);
         App_Transition(SYS_CALIBRATE);
         return;
@@ -147,7 +141,7 @@ static void App_State_Idle(void)
     {
         train_mode = (TrainMode_t)((menu_index + MODE_COUNT - 1) % MODE_COUNT);
         menu_index = (menu_index + MODE_COUNT - 1) % MODE_COUNT;
-        Voice_PlayText(mode_names[train_mode]);
+        Voice_Play(0x00, VOICE_CMD_FIXATION + (uint8_t)train_mode);
     }
 }
 
@@ -157,10 +151,10 @@ static void App_State_Idle(void)
  */
 static void App_State_Calibrate(void)
 {
-    Voice_PlayText("准备校准，请保持头部静止");
+    Voice_Play(0x00, VOICE_CMD_CALIB_STILL);
     HAL_Delay(1500);
     BMI088_euler_init();
-    Voice_PlayText("校准完成");
+    Voice_Play(0xFF, VOICE_TTS_CALIB_DONE);
     HAL_Delay(1000);
     App_Transition(SYS_TRAIN);
 }
@@ -174,7 +168,7 @@ static void App_State_Train(void)
     if (HeadTracker_CheckSafety())
     {
         sys_state = SYS_PAUSE;
-        Voice_PlayText("检测到异常姿态，训练暂停");
+        Voice_Play(0xFF, VOICE_TTS_EYE_ONLY);
         Laser_Off();
         return;
     }
@@ -196,9 +190,7 @@ static void App_State_Train(void)
  */
 static void App_State_Feedback(void)
 {
-    char buf[64];
-    sprintf(buf, "训练结束。正确率百分之%d", (int)(record.correct_trials * 100 / (record.total_trials ? record.total_trials : 1)));
-    Voice_PlayText(buf);
+    Voice_Play(0xFF, VOICE_TTS_TRAIN_DONE);
     HAL_Delay(2000);
     LED_Blink(LED_STATUS, 500);
     HAL_Delay(1500);
@@ -251,7 +243,7 @@ static void Train_Fixation(void)
     HeadAnalysis_t *head = HeadTracker_GetResult();
     if (head->head_stability > 5.0f)
     {
-        Voice_PlayText("请保持头部稳定");
+        Voice_Play(0xFF, VOICE_TTS_KEEP_STILL);
     }
 
     if (elapsed > 15000)
@@ -333,7 +325,7 @@ static void Train_Saccade(void)
         uint32_t reaction = now - trial_start_tick;
         record.avg_reaction_ms += (float)reaction;
         Laser_Off();
-        Voice_PlayText("正确");
+        Voice_Play(0xFF, VOICE_TTS_CORRECT);
         saccade_light_on_tick = 0;
         saccade_idx++;
         HAL_Delay(500);
@@ -343,7 +335,7 @@ static void Train_Saccade(void)
     if (now - saccade_light_on_tick > 3000 && trial_result == 0)
     {
         Laser_Off();
-        Voice_PlayText("超时");
+        Voice_Play(0xFF, VOICE_TTS_TIMEOUT);
         saccade_light_on_tick = 0;
         saccade_idx++;
         HAL_Delay(500);
@@ -398,7 +390,7 @@ static void Train_Pursuit(void)
     HeadAnalysis_t *head = HeadTracker_GetResult();
     if (head->is_compensatory)
     {
-        Voice_PlayText("请用眼睛跟踪，不要转头");
+        Voice_Play(0xFF, VOICE_TTS_EYE_ONLY);
     }
 
     if (now - record.start_tick > 30000)
@@ -472,7 +464,7 @@ static void Train_Neglect(void)
     if (neglect_trial_tick == 0)
     {
         neglect_side = neglect_trial_count & 1;  /* 交替左右侧 */
-        Voice_PlayText("准备");
+        Voice_Play(0x00, VOICE_CMD_CALIB_STILL);
 
         if (neglect_side == 0)
             Servo_SetAngle(SERVO_AXIS_X, 30);   /* 左侧 */
@@ -481,7 +473,7 @@ static void Train_Neglect(void)
 
         HAL_Delay(300);
         Laser_On();
-        Voice_PlayText("请寻找光点");
+        Voice_Play(0xFF, VOICE_TTS_FIND_LIGHT);
         neglect_trial_tick = now;
         neglect_responded = 0;
         record.total_trials++;
@@ -505,7 +497,7 @@ static void Train_Neglect(void)
     /* 超时 */
     if (now - neglect_trial_tick > 5000 && neglect_responded == 0)
     {
-        Voice_PlayText("超时，请多注意该侧空间");
+        Voice_Play(0xFF, VOICE_TTS_NEGLECT_HINT);
         Laser_Off();
         Servo_SetAngle(SERVO_AXIS_X, 90);
         neglect_trial_tick = 0;
