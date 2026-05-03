@@ -1,4 +1,5 @@
-ctrboard-h7_imu/bmi088middleware.o: ..\Device\BMI088\BMI088Middleware.c \
+eyes_rehabilitation_device/bmi088middleware.o: \
+  ..\Device\BMI088\BMI088Middleware.c \
   ..\Device\BMI088\inc\BMI088Middleware.h ..\Core\Inc\main.h \
   ..\Drivers\STM32H7xx_HAL_Driver\Inc\stm32h7xx_hal.h \
   ..\Core\Inc\stm32h7xx_hal_conf.h \

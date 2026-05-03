@@ -1,4 +1,5 @@
-ctrboard-h7_imu/head_tracker.o: ..\Device\HeadTracker\head_tracker.c \
+eyes_rehabilitation_device/head_tracker.o: \
+  ..\Device\HeadTracker\head_tracker.c \
   ..\Device\HeadTracker\head_tracker.h \
   ..\Device\BMI088\inc\BMI088driver.h ..\Core\Inc\main.h \
   ..\Drivers\STM32H7xx_HAL_Driver\Inc\stm32h7xx_hal.h \

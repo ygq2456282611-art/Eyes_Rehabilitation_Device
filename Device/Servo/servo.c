@@ -1,8 +1,20 @@
+/**
+ * @file    servo.c
+ * @brief   舵机云台驱动模块
+ *          基于 TIM1 的 PWM 输出，驱动双轴舵机（X轴俯仰、Y轴偏航）
+ *          TIM1 配置：Prescaler=240, Period=19999 → 50Hz (20ms)
+ *          脉宽范围：500~2500us，对应 0°~180°
+ */
 #include "servo.h"
 
+/* 两个舵机共用一个 TIM1 句柄，不同通道 */
 static TIM_HandleTypeDef *servo_tim[2] = {NULL, NULL};
 static uint32_t servo_ch[2] = {TIM_CHANNEL_3, TIM_CHANNEL_1};
 
+/**
+ * @brief  初始化舵机
+ *         绑定 TIM1 句柄，启动 PWM 输出，复位到 90° 居中位置
+ */
 void Servo_Init(void)
 {
     servo_tim[SERVO_AXIS_X] = &htim1;
@@ -15,6 +27,12 @@ void Servo_Init(void)
     Servo_SetAngle(SERVO_AXIS_Y, 90);
 }
 
+/**
+ * @brief  设置舵机角度
+ * @param  axis  : 轴编号（SERVO_AXIS_X=0俯仰, SERVO_AXIS_Y=1偏航）
+ * @param  angle : 目标角度 0~180°
+ *         内部将角度线性映射到脉宽：500 + (angle/180)*2000 us
+ */
 void Servo_SetAngle(uint8_t axis, uint8_t angle)
 {
     if (axis > SERVO_AXIS_Y || servo_tim[axis] == NULL) return;
@@ -24,6 +42,12 @@ void Servo_SetAngle(uint8_t axis, uint8_t angle)
     __HAL_TIM_SET_COMPARE(servo_tim[axis], servo_ch[axis], pulse);
 }
 
+/**
+ * @brief  直接设置舵机脉宽（微秒）
+ * @param  axis : 轴编号
+ * @param  us   : 脉宽 500~2500us
+ *         用于更精细的舵机位置控制
+ */
 void Servo_SetUs(uint8_t axis, uint16_t us)
 {
     if (axis > SERVO_AXIS_Y || servo_tim[axis] == NULL) return;
@@ -33,6 +57,13 @@ void Servo_SetUs(uint8_t axis, uint16_t us)
     __HAL_TIM_SET_COMPARE(servo_tim[axis], servo_ch[axis], us);
 }
 
+/**
+ * @brief  平滑移动到目标角度（分段插值）
+ * @param  axis       : 轴编号
+ * @param  target_angle : 目标角度 0~180°
+ * @param  time_ms    : 移动总时长（ms），每 20ms 插一步
+ *         用于平稳追踪训练中的连续轨迹模拟
+ */
 void Servo_SmoothMove(uint8_t axis, uint8_t target_angle, uint16_t time_ms)
 {
     if (axis > SERVO_AXIS_Y || servo_tim[axis] == NULL) return;
@@ -57,6 +88,10 @@ void Servo_SmoothMove(uint8_t axis, uint8_t target_angle, uint16_t time_ms)
     Servo_SetAngle(axis, target_angle);
 }
 
+/**
+ * @brief  舵机自检函数
+ *         依次运行 0°→45°→90°→135°→180°→复位90°，用于硬件验证
+ */
 void Servo_Test(void)
 {
     Servo_SetAngle(SERVO_AXIS_X, 0);  Servo_SetAngle(SERVO_AXIS_Y, 0);  HAL_Delay(500);

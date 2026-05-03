@@ -1,4 +1,4 @@
-ctrboard-h7_imu/stm32h7xx_hal_i2c.o: \
+eyes_rehabilitation_device/stm32h7xx_hal_i2c.o: \
   ..\Drivers\STM32H7xx_HAL_Driver\Src\stm32h7xx_hal_i2c.c \
   ..\Drivers\STM32H7xx_HAL_Driver\Inc\stm32h7xx_hal.h \
   ..\Core\Inc\stm32h7xx_hal_conf.h \

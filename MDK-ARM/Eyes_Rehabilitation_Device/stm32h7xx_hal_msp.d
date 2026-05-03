@@ -1,5 +1,6 @@
-ctrboard-h7_imu/stm32h7xx_hal_msp.o: ..\Core\Src\stm32h7xx_hal_msp.c \
-  ..\Core\Inc\main.h ..\Drivers\STM32H7xx_HAL_Driver\Inc\stm32h7xx_hal.h \
+eyes_rehabilitation_device/stm32h7xx_hal_msp.o: \
+  ..\Core\Src\stm32h7xx_hal_msp.c ..\Core\Inc\main.h \
+  ..\Drivers\STM32H7xx_HAL_Driver\Inc\stm32h7xx_hal.h \
   ..\Core\Inc\stm32h7xx_hal_conf.h \
   ..\Drivers\STM32H7xx_HAL_Driver\Inc\stm32h7xx_hal_rcc.h \
   ..\Drivers\STM32H7xx_HAL_Driver\Inc\stm32h7xx_hal_def.h \

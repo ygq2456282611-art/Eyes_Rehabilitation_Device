@@ -1,1 +1,1 @@
-ctrboard-h7_imu\startup_stm32h723xx.o: startup_stm32h723xx.s
+eyes_rehabilitation_device\startup_stm32h723xx.o: startup_stm32h723xx.s

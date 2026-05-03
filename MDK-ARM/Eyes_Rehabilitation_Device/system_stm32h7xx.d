@@ -1,4 +1,5 @@
-ctrboard-h7_imu/system_stm32h7xx.o: ..\Core\Src\system_stm32h7xx.c \
+eyes_rehabilitation_device/system_stm32h7xx.o: \
+  ..\Core\Src\system_stm32h7xx.c \
   ..\Drivers\CMSIS\Device\ST\STM32H7xx\Include\stm32h7xx.h \
   ..\Drivers\CMSIS\Device\ST\STM32H7xx\Include\stm32h723xx.h \
   ..\Drivers\CMSIS\Include\core_cm7.h \

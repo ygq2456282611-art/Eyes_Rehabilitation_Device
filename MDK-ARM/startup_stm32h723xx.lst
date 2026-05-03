@@ -1258,11 +1258,11 @@ ARM Macro Assembler    Page 20
               00000000 
               00000000 
 Command Line: --debug --xref --diag_suppress=9931,A1950W --cpu=Cortex-M7.fp.dp 
---depend=ctrboard-h7_imu\startup_stm32h723xx.d -octrboard-h7_imu\startup_stm32h
-723xx.o -I.\RTE\_CtrBoard-H7_IMU -ID:\Keil_v5\ARM\CMSIS\6.3.0\CMSIS\Core\Includ
-e --predefine="__MICROLIB SETA 1" --predefine="__UVISION_VERSION SETA 543" --pr
-edefine="STM32H723xx SETA 1" --predefine="_RTE_ SETA 1" --list=startup_stm32h72
-3xx.lst startup_stm32h723xx.s
+--depend=eyes_rehabilitation_device\startup_stm32h723xx.d -oeyes_rehabilitation
+_device\startup_stm32h723xx.o -I.\RTE\_Eyes_Rehabilitation_Device -ID:\Keil_v5\
+ARM\CMSIS\6.3.0\CMSIS\Core\Include --predefine="__MICROLIB SETA 1" --predefine=
+"__UVISION_VERSION SETA 543" --predefine="STM32H723xx SETA 1" --predefine="_RTE
+_ SETA 1" --list=startup_stm32h723xx.lst startup_stm32h723xx.s
 
 
 
