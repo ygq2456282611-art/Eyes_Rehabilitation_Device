@@ -131,10 +131,7 @@ static void App_State_Idle(void)
     {
         train_mode = (TrainMode_t)((menu_index + 1) % MODE_COUNT);
         menu_index++;
-Voice_Play(0x00, VOICE_CMD_FIXATION + (uint8_t)train_mode);
-        HAL_Delay(800);
-        App_Transition(SYS_CALIBRATE);
-        return;
+        Voice_Play(0x00, VOICE_CMD_FIXATION + (uint8_t)train_mode);
     }
 
     if (Key_GetEvent(KEY_BACK) == KEY_EVENT_SHORT)
