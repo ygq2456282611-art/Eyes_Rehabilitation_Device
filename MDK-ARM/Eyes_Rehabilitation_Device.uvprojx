@@ -81,7 +81,7 @@
           </BeforeMake>
           <AfterMake>
             <RunUserProg1>0</RunUserProg1>
-            <RunUserProg2>1</RunUserProg2>
+            <RunUserProg2>0</RunUserProg2>
             <UserProg1Name></UserProg1Name>
             <UserProg2Name></UserProg2Name>
             <UserProg1Dos16Mode>0</UserProg1Dos16Mode>
@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32H723xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32H7xx/Include;../Drivers/CMSIS/Include;../Device/BMI088/inc;../Device/BMI088;../Device/HeadTracker;../Device/Key;../Device/Laser;../Device/LED;../Device/Servo;../Device/Voice;../App</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32H7xx/Include;../Drivers/CMSIS/Include;../Device/BMI088/inc;../Device/BMI088;../Device/HeadTracker;../Device/Key;../Device/Laser;../Device/LED;../Device/Servo;../Device/Voice;../App;..\Device\Buzzer</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -812,6 +812,11 @@
               <FileName>voice.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Device\Voice\voice.c</FilePath>
+            </File>
+            <File>
+              <FileName>buzzer.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Device\Buzzer\buzzer.c</FilePath>
             </File>
           </Files>
         </Group>

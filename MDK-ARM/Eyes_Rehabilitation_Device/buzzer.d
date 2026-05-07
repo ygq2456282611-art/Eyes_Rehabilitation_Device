@@ -1,4 +1,5 @@
-eyes_rehabilitation_device/main.o: ..\Core\Src\main.c ..\Core\Inc\main.h \
+eyes_rehabilitation_device/buzzer.o: ..\Device\Buzzer\buzzer.c \
+  ..\Device\Buzzer\buzzer.h ..\Core\Inc\main.h \
   ..\Drivers\STM32H7xx_HAL_Driver\Inc\stm32h7xx_hal.h \
   ..\Core\Inc\stm32h7xx_hal_conf.h \
   ..\Drivers\STM32H7xx_HAL_Driver\Inc\stm32h7xx_hal_rcc.h \
@@ -28,10 +29,4 @@ eyes_rehabilitation_device/main.o: ..\Core\Src\main.c ..\Core\Inc\main.h \
   ..\Drivers\STM32H7xx_HAL_Driver\Inc\stm32h7xx_hal_tim.h \
   ..\Drivers\STM32H7xx_HAL_Driver\Inc\stm32h7xx_hal_tim_ex.h \
   ..\Drivers\STM32H7xx_HAL_Driver\Inc\stm32h7xx_hal_uart.h \
-  ..\Drivers\STM32H7xx_HAL_Driver\Inc\stm32h7xx_hal_uart_ex.h \
-  ..\Core\Inc\dma.h ..\Core\Inc\spi.h ..\Core\Inc\tim.h \
-  ..\Core\Inc\usart.h ..\Core\Inc\gpio.h \
-  ..\Device\BMI088\inc\BMI088driver.h ..\Device\Servo\servo.h \
-  ..\Device\Voice\voice.h ..\Device\Laser\laser.h ..\Device\Key\key.h \
-  ..\Device\LED\led.h ..\Device\HeadTracker\head_tracker.h \
-  ..\App\train_modes.h ..\Device\Buzzer\buzzer.h
+  ..\Drivers\STM32H7xx_HAL_Driver\Inc\stm32h7xx_hal_uart_ex.h

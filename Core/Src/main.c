@@ -34,6 +34,7 @@
 #include "led.h"
 #include "head_tracker.h"
 #include "train_modes.h"
+#include "buzzer.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -67,6 +68,7 @@ void SystemClock_Config(void);
 /* USER CODE BEGIN 0 */
 bmi088_euler_data_t euler_angle;
 float temp;
+static uint8_t prev_compensatory = 0;
 /* USER CODE END 0 */
 
 /**
@@ -107,16 +109,20 @@ int main(void)
         ;
     }
 
+    BMI088_euler_init();
+    HAL_Delay(2000);
+
     Servo_Init();
-    Voice_Init();
     Laser_Init();
-    Key_Init();
     LED_Init();
+    Key_Init();
     HeadTracker_Init();
     App_Init();
+    Buzzer_Init();
 
-    Laser_Blink(200, 3);
-    Voice_Play(0xFF, VOICE_TTS_INIT_OK);
+    /* 语音模块未连接时先不初始化，避免 PA10 浮空触发噪声中断 */
+    /* 等硬件接好后，取消下面这行的注释 */
+    // Voice_Init();
 
   /* USER CODE END 2 */
 
@@ -129,6 +135,15 @@ int main(void)
     /* USER CODE BEGIN 3 */
         BMI088_read_euler(&euler_angle, &temp);
         HeadTracker_Update(&euler_angle, 0.01f);
+
+        /* 代偿性转头报警：蜂鸣器短促响两声提醒患者 */
+        HeadAnalysis_t *head = HeadTracker_GetResult();
+        if (head->is_compensatory && !prev_compensatory)
+        {
+            Buzzer_Alert(2, 150, 100);
+        }
+        prev_compensatory = head->is_compensatory;
+
         Key_Scan();
         App_Run(&euler_angle, temp);
         HAL_Delay(10);

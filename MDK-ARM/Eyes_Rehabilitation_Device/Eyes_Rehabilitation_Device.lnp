@@ -39,6 +39,7 @@
 "eyes_rehabilitation_device\led.o"
 "eyes_rehabilitation_device\servo.o"
 "eyes_rehabilitation_device\voice.o"
+"eyes_rehabilitation_device\buzzer.o"
 "eyes_rehabilitation_device\train_modes.o"
 --library_type=microlib --strict --scatter "Eyes_Rehabilitation_Device\Eyes_Rehabilitation_Device.sct"
 --summary_stderr --info summarysizes --map --load_addr_map_info --xref --callgraph --symbols
