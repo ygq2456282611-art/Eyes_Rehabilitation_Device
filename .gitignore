@@ -1,0 +1,28 @@
+# Build outputs
+*.o
+*.d
+*.axf
+*.hex
+*.map
+*.htm
+*.lnp
+*.crf
+*.lst
+*.iex
+*.bak
+
+# Keil
+*.uvguix.*
+*.dep
+DebugConfig/
+Listings/
+Objects/
+build_log.*
+
+# IDE
+.vscode/
+.vscode/settings.json
+
+# Temp
+tmp/
+out/

@@ -5,8 +5,9 @@
 
 
 
-
 static void BMI088_read_muli_reg(uint8_t reg, uint8_t *buf, uint8_t len);
+static uint8_t bmi088_accel_init(void);
+static uint8_t bmi088_gyro_init(void);
 
 float BMI088_ACCEL_SEN = BMI088_ACCEL_3G_SEN;
 float BMI088_GYRO_SEN = BMI088_GYRO_2000_SEN;
@@ -31,7 +32,6 @@ typedef struct {
 } Kalman_t;
 
 static Kalman_t kalman_pitch;
-static Kalman_t kalman_roll;
 
 // 默认噪声参数，可根据实际调整
 static const float KALMAN_Q_ANGLE = 0.001f;
@@ -150,7 +150,6 @@ void BMI088_euler_init(void)
     BMI088_gyro_calibration();
     // 初始化卡尔曼滤波器
     BMI088_kalman_init(&kalman_pitch);
-    BMI088_kalman_init(&kalman_roll);
 }
 
 /**
@@ -176,31 +175,42 @@ static void BMI088_accel_to_angle(float accel[3], float *pitch, float *roll)
  */
 static void BMI088_update_euler(float gyro[3], float accel[3], float dt)
 {
-    float accel_pitch, accel_roll;
-    
-    // 1. 从加速度计计算当前的pitch和roll（用于测量更新）
-    BMI088_accel_to_angle(accel, &accel_pitch, &accel_roll);
+    float head_accel[3], head_gyro[3];
+    float accel_pitch;
 
-    // 2. 使用卡尔曼滤波器对 pitch/roll 进行融合
+    /* axis remap: sensor -> head frame
+       Board: USB up, BMI088 X-up, Y-left
+       head_X(forward) = -sensor_Z, head_Y(left) = sensor_Y, head_Z(up) = sensor_X */
+    head_accel[0] = -accel[2];   /* forward */
+    head_accel[1] =  accel[1];   /* left */
+    head_accel[2] =  accel[0];   /* up */
+
+    head_gyro[0] = -gyro[2];     /* around forward */
+    head_gyro[1] =  gyro[1];     /* around left (nod axis) */
+    head_gyro[2] =  gyro[0];     /* around vertical (turn axis) */
+
     if(is_calibrated)
     {
-        euler_angle.pitch = BMI088_kalman_update(&kalman_pitch, gyro[0] - gyro_offset[0], accel_pitch, dt);
-        euler_angle.roll  = BMI088_kalman_update(&kalman_roll,  gyro[1] - gyro_offset[1], accel_roll,  dt);
-        euler_angle.yaw  += (gyro[2] - gyro_offset[2]) * dt; // yaw 仍通过陀螺仪积分
+        /* Pitch (nod): Kalman, accel abs ref + gyro rate (now in deg/s) */
+        accel_pitch = atan2f(head_accel[0],
+                             sqrtf(head_accel[1]*head_accel[1] + head_accel[2]*head_accel[2]))
+                      * 180.0f / PI;
+        euler_angle.pitch = BMI088_kalman_update(&kalman_pitch,
+                                                  head_gyro[1] - gyro_offset[1],
+                                                  accel_pitch, dt);
+        /* Roll (head turn): pure gyro integration around vertical axis */
+        euler_angle.roll += (head_gyro[2] - gyro_offset[0]) * dt;
     }
     else
     {
-        // 校准前使用原始陀螺仪积分以避免偏差
-        euler_angle.pitch += gyro[0] * dt;
-        euler_angle.roll  += gyro[1] * dt;
-        euler_angle.yaw   += gyro[2] * dt;
+        euler_angle.pitch += head_gyro[1] * dt;
+        euler_angle.roll  += head_gyro[2] * dt;
     }
 
-    // 归一化 yaw 到 -180° 到 +180° 范围
-    euler_angle.yaw = BMI088_normalize_angle(euler_angle.yaw);
+    euler_angle.roll = BMI088_normalize_angle(euler_angle.roll);
+    /* Yaw (lateral tilt): from accel, 0 at vertical using fabsf(Z) */
+    euler_angle.yaw   = atan2f(head_accel[1], fabsf(head_accel[2])) * 180.0f / PI;
 }
-
-
 
 #if defined(BMI088_USE_SPI)
 /**

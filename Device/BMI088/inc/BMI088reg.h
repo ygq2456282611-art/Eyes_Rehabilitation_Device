@@ -177,4 +177,21 @@
 #define BMI088_GYRO_TRIG_BIST_SHFITS 0x0
 #define BMI088_GYRO_TRIG_BIST (0x1 << BMI088_GYRO_TRIG_BIST_SHFITS)
 
+#define BMI088_NO_ERROR                   0x00
+#define BMI088_NO_SENSOR                  0xFF
+
+#define BMI088_ACC_PWR_CTRL_ERROR         0x01
+#define BMI088_ACC_PWR_CONF_ERROR         0x02
+#define BMI088_ACC_CONF_ERROR             0x03
+#define BMI088_ACC_RANGE_ERROR            0x04
+#define BMI088_INT1_IO_CTRL_ERROR         0x05
+#define BMI088_INT_MAP_DATA_ERROR         0x06
+
+#define BMI088_GYRO_RANGE_ERROR           0x11
+#define BMI088_GYRO_BANDWIDTH_ERROR       0x12
+#define BMI088_GYRO_LPM1_ERROR            0x13
+#define BMI088_GYRO_CTRL_ERROR            0x14
+#define BMI088_GYRO_INT3_INT4_IO_CONF_ERROR 0x15
+#define BMI088_GYRO_INT3_INT4_IO_MAP_ERROR   0x16
+
 #endif

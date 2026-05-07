@@ -16,6 +16,9 @@
 #include <string.h>
 
 static HeadAnalysis_t result;
+static uint8_t last_pitch_valid = 0;
+static uint8_t last_roll_valid = 0;
+static uint32_t last_update_ms = 0;
 
 /* ============ 可调阈值 ============ */
 static const float COMPENSATORY_ROLL_THRESHOLD  = 20.0f;  /* roll 超过此值视为代偿转头 */
