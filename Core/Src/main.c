@@ -115,6 +115,16 @@ int main(void)
     BMI088_euler_init();
     HAL_Delay(2000);
 
+    /* 使能 DM-02 板载 5V 可控电源输出（舵机/PWM/串口/CAN 供电） */
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    GPIO_InitTypeDef pwr = {0};
+    pwr.Pin = GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15;
+    pwr.Mode = GPIO_MODE_OUTPUT_PP;
+    pwr.Pull = GPIO_NOPULL;
+    pwr.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOC, &pwr);
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15, GPIO_PIN_SET);
+
     Servo_Init();
     Laser_Init();
     Key_Init();

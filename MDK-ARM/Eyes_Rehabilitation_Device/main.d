@@ -34,4 +34,5 @@ eyes_rehabilitation_device/main.o: ..\Core\Src\main.c ..\Core\Inc\main.h \
   ..\Device\BMI088\inc\BMI088driver.h ..\Device\Servo\servo.h \
   ..\Device\Voice\voice.h ..\Device\Laser\laser.h ..\Device\Key\key.h \
   ..\Device\LED\led.h ..\Device\HeadTracker\head_tracker.h \
-  ..\App\train_modes.h
+  ..\App\train_modes.h ..\Device\Buzzer\buzzer.h \
+  ..\Device\WS2812\ws2812.h
