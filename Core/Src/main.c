@@ -126,8 +126,9 @@ int main(void)
     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15, GPIO_PIN_SET);
 
     Servo_Init();
-    Servo_Test();
+    Servo_Test();// 舵机自检：依次转到 0°、90°、180°，验证舵机控制和 PWM 输出正常
     Laser_Init();
+    Laser_Test();// 点亮激光并闪烁 3 次，验证 PA0 输出正常
     Key_Init();
     LED_Init();
     HeadTracker_Init();
@@ -138,7 +139,7 @@ int main(void)
     /* 语音模块未连接时先不初始化，避免 PA10 浮空触发噪声中断 */
     /* 等硬件接好后，取消下面这行的注释 */
     // Voice_Init();
-
+    Buzzer_Alert(3, 200, 100);
     Laser_Blink(200, 3);
 
   /* USER CODE END 2 */
@@ -148,7 +149,7 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-    
+
     /* USER CODE BEGIN 3 */
         BMI088_read_euler(&euler_angle, &temp);
         HeadTracker_Update(&euler_angle, 0.01f);

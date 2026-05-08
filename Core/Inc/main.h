@@ -68,8 +68,8 @@ void Error_Handler(void);
 
 /* USER CODE BEGIN Private defines */
 
-#define LASER_Pin       GPIO_PIN_2
-#define LASER_GPIO_Port GPIOD
+#define LASER_Pin       GPIO_PIN_0
+#define LASER_GPIO_Port GPIOA
 
 #define LED_FOCUS_Pin       GPIO_PIN_8
 #define LED_FOCUS_GPIO_Port GPIOB
