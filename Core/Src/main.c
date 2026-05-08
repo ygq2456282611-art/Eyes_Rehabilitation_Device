@@ -126,6 +126,7 @@ int main(void)
     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15, GPIO_PIN_SET);
 
     Servo_Init();
+    Servo_Test();
     Laser_Init();
     Key_Init();
     LED_Init();
@@ -147,7 +148,7 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-
+    
     /* USER CODE BEGIN 3 */
         BMI088_read_euler(&euler_angle, &temp);
         HeadTracker_Update(&euler_angle, 0.01f);

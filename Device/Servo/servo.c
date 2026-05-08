@@ -89,15 +89,26 @@ void Servo_SmoothMove(uint8_t axis, uint8_t target_angle, uint16_t time_ms)
 }
 
 /**
- * @brief  舵机自检函数
- *         依次运行 0°→45°→90°→135°→180°→复位90°，用于硬件验证
+ * @brief  舵机自检函数（分轴测试，防止云台机械碰撞）
+ *         先 X 轴(俯仰)独立走 0°→45°→90°→135°→180°→复位
+ *         再 Y 轴(偏航)独立走同样流程
  */
 void Servo_Test(void)
 {
-    Servo_SetAngle(SERVO_AXIS_X, 0);  Servo_SetAngle(SERVO_AXIS_Y, 0);  HAL_Delay(500);
-    Servo_SetAngle(SERVO_AXIS_X, 45); Servo_SetAngle(SERVO_AXIS_Y, 45); HAL_Delay(500);
-    Servo_SetAngle(SERVO_AXIS_X, 90); Servo_SetAngle(SERVO_AXIS_Y, 90); HAL_Delay(500);
-    Servo_SetAngle(SERVO_AXIS_X, 135);Servo_SetAngle(SERVO_AXIS_Y, 135);HAL_Delay(500);
-    Servo_SetAngle(SERVO_AXIS_X, 180);Servo_SetAngle(SERVO_AXIS_Y, 180);HAL_Delay(500);
-    Servo_SetAngle(SERVO_AXIS_X, 90); Servo_SetAngle(SERVO_AXIS_Y, 90);
+    /* X轴测试：Y轴保持居中 */
+    Servo_SetAngle(SERVO_AXIS_Y, 90);
+    Servo_SetAngle(SERVO_AXIS_X, 0);   HAL_Delay(500);
+    Servo_SetAngle(SERVO_AXIS_X, 45);  HAL_Delay(500);
+    Servo_SetAngle(SERVO_AXIS_X, 90);  HAL_Delay(500);
+    Servo_SetAngle(SERVO_AXIS_X, 135); HAL_Delay(500);
+    Servo_SetAngle(SERVO_AXIS_X, 180); HAL_Delay(500);
+    Servo_SetAngle(SERVO_AXIS_X, 90);  HAL_Delay(300);
+
+    /* Y轴测试：X轴保持居中 */
+    Servo_SetAngle(SERVO_AXIS_Y, 0);   HAL_Delay(500);
+    Servo_SetAngle(SERVO_AXIS_Y, 45);  HAL_Delay(500);
+    Servo_SetAngle(SERVO_AXIS_Y, 90);  HAL_Delay(500);
+    Servo_SetAngle(SERVO_AXIS_Y, 135); HAL_Delay(500);
+    Servo_SetAngle(SERVO_AXIS_Y, 180); HAL_Delay(500);
+    Servo_SetAngle(SERVO_AXIS_Y, 90);
 }
