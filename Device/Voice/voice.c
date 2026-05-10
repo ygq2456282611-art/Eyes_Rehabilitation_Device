@@ -34,8 +34,12 @@ void Voice_Init(void)
     huart = &huart1;
     rx_idx = 0;
     rx_frame_ready = 0;
-    /* 启动单字节接收中断：收到 1 字节即触发回调 */
     HAL_UART_Receive_IT(huart, rx_buf, 1);
+
+    /* 模块握手：CI1302 上电后需先发送 init 命令（AA 55 FF 67 FB） */
+    HAL_Delay(100);
+    Voice_SendFrame(0xFF, VOICE_TTS_INIT_MODULE);
+    HAL_Delay(100);
 }
 
 /**

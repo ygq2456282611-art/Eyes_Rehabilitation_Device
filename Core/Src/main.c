@@ -107,11 +107,8 @@ int main(void)
   MX_TIM1_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
-    while(BMI088_init())
-    {
-        ;
-    }
-
+    
+    BMI088_init();
     BMI088_euler_init();
     HAL_Delay(2000);
 
@@ -127,20 +124,21 @@ int main(void)
 
     Servo_Init();
     Servo_Test();// 舵机自检：依次转到 0°、90°、180°，验证舵机控制和 PWM 输出正常
+
     Laser_Init();
     Laser_Test();// 点亮激光并闪烁 3 次，验证 PA0 输出正常
+
     Key_Init();
     LED_Init();
     HeadTracker_Init();
     App_Init();
     Buzzer_Init();
     WS2812_Init();
-
-    /* 语音模块未连接时先不初始化，避免 PA10 浮空触发噪声中断 */
-    /* 等硬件接好后，取消下面这行的注释 */
-    // Voice_Init();
+    Voice_Init();
+    
     Buzzer_Alert(3, 200, 100);
     Laser_Blink(200, 3);
+    Voice_Play(0xFF, VOICE_TTS_INIT_OK);
 
   /* USER CODE END 2 */
 

@@ -57,6 +57,7 @@
 #define VOICE_TTS_INIT_OK       0x58  /* "初始化完成" — 系统上电播报 */
 #define VOICE_TTS_TRAIN_DONE    0x5E  /* "训练结束，太棒了" */
 #define VOICE_TTS_WELCOME       0x5F  /* "欢迎使用眼部康复装置" */
+#define VOICE_TTS_INIT_MODULE   0x67  /* 模块握手初始化（例程必须首先发送） */
 
 /* ========================================================================
  * 函数声明
