@@ -138,8 +138,10 @@ int main(void)
     
     Buzzer_Alert(3, 200, 100);
     Laser_Blink(200, 3);
-    Voice_Play(0xFF, VOICE_TTS_INIT_OK);
 
+    Voice_Play(0xFF, VOICE_TTS_INIT_OK);
+    HAL_Delay(5000);
+    Voice_Play(0xFF, VOICE_TTS_WELCOME); // 欢迎
   /* USER CODE END 2 */
 
   /* Infinite loop */

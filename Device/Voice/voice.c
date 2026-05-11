@@ -12,9 +12,18 @@
 #include "voice.h"
 #include "usart.h"
 #include <string.h>
+#include <stdio.h>
 
 /* USART1 句柄指针，由 Voice_Init 赋值 */
 static UART_HandleTypeDef *huart = NULL;
+
+/* 重定向 printf 到 USART1（调试输出） */
+int fputc(int ch, FILE *f)
+{
+    if (huart == NULL) return ch;
+    HAL_UART_Transmit(huart, (uint8_t *)&ch, 1, 100);
+    return ch;
+}
 
 /* ============ UART RX 帧接收状态 ============ */
 #define RX_BUF_SIZE  16                     /* 接收缓冲区大小 */
@@ -34,12 +43,8 @@ void Voice_Init(void)
     huart = &huart1;
     rx_idx = 0;
     rx_frame_ready = 0;
+    HAL_Delay(200);
     HAL_UART_Receive_IT(huart, rx_buf, 1);
-
-    /* 模块握手：CI1302 上电后需先发送 init 命令（AA 55 FF 67 FB） */
-    HAL_Delay(100);
-    Voice_SendFrame(0xFF, VOICE_TTS_INIT_MODULE);
-    HAL_Delay(100);
 }
 
 /**

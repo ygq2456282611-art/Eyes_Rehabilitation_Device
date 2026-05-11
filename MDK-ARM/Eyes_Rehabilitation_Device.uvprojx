@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32H723xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32H7xx/Include;../Drivers/CMSIS/Include;../Device/BMI088/inc;../Device/BMI088;../Device/HeadTracker;../Device/Key;../Device/Laser;../Device/LED;../Device/Servo;../Device/Voice;../App;../Device/Buzzer;..\Device\WS2812</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32H7xx/Include;../Drivers/CMSIS/Include;../Device/BMI088/inc;../Device/BMI088;../Device/HeadTracker;../Device/Key;../Device/Laser;../Device/LED;../Device/Servo;../Device/Voice;../App;../Device/Buzzer;../Device/WS2812</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
