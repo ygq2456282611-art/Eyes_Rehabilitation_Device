@@ -1,12 +1,12 @@
 /**
  * @file    voice.c
  * @brief   亚博 AI 语音交互模块 (CI1302) 驱动实现
- *          基于 USART1（115200, 8N1）实现与 CI1302 芯片的双向通信：
+ *          基于 UART7（PE7=RX, PE8=TX, 115200, 8N1）与 CI1302 芯片的双向通信：
  *          - TX：发送 5 字节帧触发 TTS 播报或语音命令
  *          - RX：中断接收模块返回的识别结果帧
  *
  * @note UART RX 中断工作方式：
- *       HAL_UART_Receive_IT(&huart1, buf, 1) → 每收到 1 字节触发
+ *       HAL_UART_Receive_IT(&huart7, buf, 1) → 每收到 1 字节触发
  *       HAL_UART_RxCpltCallback() → 逐字节拼装帧 → 校验帧尾 0xFB → 提取 ID
  */
 #include "voice.h"
@@ -14,7 +14,7 @@
 #include <string.h>
 #include <stdio.h>
 
-/* USART1 句柄指针，由 Voice_Init 赋值 */
+/* UART7 句柄指针，由 Voice_Init 赋值 */
 static UART_HandleTypeDef *huart = NULL;
 
 /* 重定向 printf 到 USART1（调试输出） */
@@ -40,7 +40,7 @@ static uint8_t  rx_frame_id   = 0;          /* 最新帧的 ID */
  */
 void Voice_Init(void)
 {
-    huart = &huart1;
+    huart = &huart7;
     rx_idx = 0;
     rx_frame_ready = 0;
     HAL_Delay(200);

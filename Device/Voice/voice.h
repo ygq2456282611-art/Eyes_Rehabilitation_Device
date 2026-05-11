@@ -10,8 +10,8 @@
  *           - TYPE=0xFF      : 播报TTS（MCU触发纯文本播报）
  *
  * @section 接线
- *           PA9  (USART1_TX) → 模块 RX
- *           PA10 (USART1_RX) → 模块 TX（可选，用于接收识别结果）
+ *           PE8 (UART7_TX) → 模块 RX
+ *           PE7 (UART7_RX) → 模块 TX（可选，用于接收识别结果）
  */
 #ifndef VOICE_H
 #define VOICE_H

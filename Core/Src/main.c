@@ -106,6 +106,7 @@ int main(void)
   MX_SPI2_Init();
   MX_TIM1_Init();
   MX_USART1_UART_Init();
+  MX_UART7_Init();
   /* USER CODE BEGIN 2 */
     
     BMI088_init();
@@ -138,9 +139,9 @@ int main(void)
     
     Buzzer_Alert(3, 200, 100);
     Laser_Blink(200, 3);
-
-    Voice_Play(0xFF, VOICE_TTS_INIT_OK);
-    HAL_Delay(5000);
+    HAL_Delay(4000);
+    Voice_Play(0xFF, VOICE_TTS_INIT_OK); // 初始化完成播报
+    HAL_Delay(4000);
     Voice_Play(0xFF, VOICE_TTS_WELCOME); // 欢迎
   /* USER CODE END 2 */
 
