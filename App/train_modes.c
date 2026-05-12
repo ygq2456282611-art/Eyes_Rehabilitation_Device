@@ -217,7 +217,7 @@ static void App_State_Pause(void)
         {
             Voice_Play(0xFF, VOICE_TTS_CORRECT);
             voice_cooldown = HAL_GetTick();
-            HAL_Delay(800);
+            HAL_Delay(2000);
             Laser_On();
             pause_voice_played  = 0;
             pause_stable_tick   = 0;
@@ -244,7 +244,6 @@ static void App_SafetyCheck(void)
     if (alert)
     {
         sys_state = SYS_PAUSE;
-        pause_enter_tick  = HAL_GetTick();
         pause_stable_tick = 0;
         pause_voice_played = 0;
     }
@@ -276,7 +275,7 @@ static void App_Transition(SystemState_t next_state)
         /* 播报当前模式 */
         Voice_Play(0x00, mode_voice_id[train_mode]);
         voice_cooldown = HAL_GetTick();
-        HAL_Delay(800);
+        HAL_Delay(3000);
     }
 
     if (next_state == SYS_IDLE_VOICE)
