@@ -1,4 +1,4 @@
-﻿/* USER CODE BEGIN Header */
+/* USER CODE BEGIN Header */
 /**
   ******************************************************************************
   * @file           : main.c
@@ -70,7 +70,8 @@ void SystemClock_Config(void);
 bmi088_euler_data_t euler_angle;
 float temp;
 static uint32_t ws2812_alert_tick = 0;
-static uint8_t ws2812_alert_on = 0;
+static uint8_t  ws2812_alert_on = 0;
+static uint8_t  prev_alert_active = 0;
 /* USER CODE END 0 */
 
 /**
@@ -142,6 +143,22 @@ int main(void)
     Voice_Play(0xFF, VOICE_TTS_INIT_OK); // 初始化完成播报
     HAL_Delay(4000);
     Voice_Play(0xFF, VOICE_TTS_WELCOME); // 欢迎
+    HAL_Delay(2000);
+
+    /* ==== PA2 按键测试（成功后删除）==== */
+    Laser_Blink(200, 2);
+    while (1)
+    {
+        Key_Scan();
+        if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT)
+        {
+            Buzzer_Alert(2, 150, 100);
+            break;
+        }
+        HAL_Delay(10);
+    }
+    /* ================================== */
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -160,6 +177,13 @@ int main(void)
         if (fabsf(euler_angle.roll)  > 20.0f) alert_active = 1;
         if (fabsf(euler_angle.pitch) > 20.0f) alert_active = 1;
         if (fabsf(euler_angle.yaw)   > 30.0f) alert_active = 1;
+
+        /* 蜂鸣器：刚进入报警状态时响两声 */
+        if (alert_active && !prev_alert_active)
+        {
+            Buzzer_Alert(2, 150, 100);
+        }
+        prev_alert_active = alert_active;
 
         /* WS2812：报警态红色闪烁，正常态绿色呼吸 */
         if (alert_active)

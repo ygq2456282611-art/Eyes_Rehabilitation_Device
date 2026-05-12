@@ -52,9 +52,11 @@ static uint8_t  neglect_responded   = 0;
 static uint8_t  neglect_trial_count = 0;
 
 /* ===== 安全暂停/恢复变量 ===== */
-static uint32_t pause_enter_tick    = 0;
 static uint32_t pause_stable_tick   = 0;
 static uint8_t  pause_voice_played  = 0;
+
+/* 语音播报冷却计时（防止每 10ms 循环重复触发同一句） */
+static uint32_t voice_cooldown = 0;
 
 /* ===== 模式名语音 ID 映射 ===== */
 static const uint8_t mode_voice_id[MODE_COUNT] = {
@@ -144,10 +146,12 @@ static void App_State_IdleVoice(void)
 static void App_State_Calibrate(void)
 {
     Voice_Play(0x00, VOICE_CMD_CALIB_STILL);
-    HAL_Delay(2000);
+    voice_cooldown = HAL_GetTick();
+    HAL_Delay(2500);
     BMI088_euler_init();
     Voice_Play(0xFF, VOICE_TTS_CALIB_DONE);
-    HAL_Delay(1000);
+    voice_cooldown = HAL_GetTick();
+    HAL_Delay(1500);
     App_Transition(SYS_TRAIN);
 }
 
@@ -173,7 +177,8 @@ static void App_State_Train(void)
 static void App_State_Feedback(void)
 {
     Voice_Play(0xFF, VOICE_TTS_TRAIN_DONE);
-    HAL_Delay(2500);
+    voice_cooldown = HAL_GetTick();
+    HAL_Delay(3000);
     App_Transition(SYS_IDLE_VOICE);
 }
 
@@ -187,6 +192,7 @@ static void App_State_Pause(void)
     if (!pause_voice_played)
     {
         Voice_Play(0xFF, VOICE_TTS_KEEP_STILL);
+        voice_cooldown = HAL_GetTick();
         Buzzer_Alert(2, 150, 100);
         Laser_Off();
         Servo_SetAngle(SERVO_AXIS_X, 90);
@@ -210,6 +216,7 @@ static void App_State_Pause(void)
         if (now - pause_stable_tick >= 3000)
         {
             Voice_Play(0xFF, VOICE_TTS_CORRECT);
+            voice_cooldown = HAL_GetTick();
             HAL_Delay(800);
             Laser_On();
             pause_voice_played  = 0;
@@ -264,9 +271,12 @@ static void App_Transition(SystemState_t next_state)
         neglect_trial_tick = 0;
         pause_stable_tick = 0;
         pause_voice_played = 0;
+        voice_cooldown = 0;
 
         /* 播报当前模式 */
         Voice_Play(0x00, mode_voice_id[train_mode]);
+        voice_cooldown = HAL_GetTick();
+        HAL_Delay(800);
     }
 
     if (next_state == SYS_IDLE_VOICE)
@@ -294,7 +304,12 @@ static void Train_Fixation(void)
     HeadAnalysis_t *head = HeadTracker_GetResult();
     if (head->head_stability > 5.0f)
     {
-        Voice_Play(0xFF, VOICE_TTS_KEEP_STILL);
+        if (HAL_GetTick() - voice_cooldown > 3000)
+        {
+            Voice_Play(0xFF, VOICE_TTS_KEEP_STILL);
+            voice_cooldown = HAL_GetTick();
+            HAL_Delay(500);
+        }
     }
 
     if (elapsed > 15000)
@@ -370,6 +385,8 @@ static void Train_Saccade(void)
         record.avg_reaction_ms += (float)(now - trial_start_tick);
         Laser_Off();
         Voice_Play(0xFF, VOICE_TTS_CORRECT);
+        voice_cooldown = HAL_GetTick();
+        HAL_Delay(800);
         saccade_light_on_tick = 0;
         saccade_idx++;
         HAL_Delay(500);
@@ -380,6 +397,8 @@ static void Train_Saccade(void)
     {
         Laser_Off();
         Voice_Play(0xFF, VOICE_TTS_TIMEOUT);
+        voice_cooldown = HAL_GetTick();
+        HAL_Delay(800);
         saccade_light_on_tick = 0;
         saccade_idx++;
         HAL_Delay(500);
@@ -419,7 +438,14 @@ static void Train_Pursuit(void)
 
     HeadAnalysis_t *head = HeadTracker_GetResult();
     if (head->is_compensatory)
-        Voice_Play(0xFF, VOICE_TTS_EYE_ONLY);
+    {
+        if (HAL_GetTick() - voice_cooldown > 3000)
+        {
+            Voice_Play(0xFF, VOICE_TTS_EYE_ONLY);
+            voice_cooldown = HAL_GetTick();
+            HAL_Delay(500);
+        }
+    }
 
     if (now - record.start_tick > 30000)
     {
@@ -475,6 +501,7 @@ static void Train_Neglect(void)
         HAL_Delay(300);
         Laser_On();
         Voice_Play(0xFF, VOICE_TTS_FIND_LIGHT);
+        voice_cooldown = HAL_GetTick();
         neglect_trial_tick = now;
         neglect_responded = 0;
         record.total_trials++;
@@ -492,6 +519,7 @@ static void Train_Neglect(void)
         Laser_Off();
         Servo_SetAngle(SERVO_AXIS_X, 90);
         Voice_Play(0xFF, VOICE_TTS_CORRECT);
+        voice_cooldown = HAL_GetTick();
         neglect_trial_tick = 0;
         HAL_Delay(1500);
         return;
@@ -500,6 +528,7 @@ static void Train_Neglect(void)
     if (now - neglect_trial_tick > 5000 && !neglect_responded)
     {
         Voice_Play(0xFF, VOICE_TTS_NEGLECT_HINT);
+        voice_cooldown = HAL_GetTick();
         Laser_Off();
         Servo_SetAngle(SERVO_AXIS_X, 90);
         neglect_trial_tick = 0;

@@ -44,6 +44,9 @@ void Voice_Init(void)
     rx_idx = 0;
     rx_frame_ready = 0;
     HAL_Delay(200);
+    /* 使能 UART7 中断（RXNE 接收识别结果） */
+    __HAL_UART_ENABLE_IT(&huart7, UART_IT_RXNE);
+    HAL_NVIC_EnableIRQ(UART7_IRQn);
     HAL_UART_Receive_IT(huart, rx_buf, 1);
 }
 
