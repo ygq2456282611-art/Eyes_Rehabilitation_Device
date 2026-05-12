@@ -6,6 +6,7 @@
 #define KEY_MODE    0
 #define KEY_CONFIRM 1
 #define KEY_BACK    2
+#define KEY_PATIENT 3
 
 typedef enum {
     KEY_EVENT_NONE  = 0,

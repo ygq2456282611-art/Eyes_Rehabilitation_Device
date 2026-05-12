@@ -1,13 +1,13 @@
 /**
  * @file    key.c
  * @brief   按键驱动模块（软件消抖 + 长短按检测）
- *          3 个按键：模式选择(PD15)、确认(PD14)、返回(PE14)
+ *          4 个按键：模式选择(PD15)、确认(PD14)、返回(PE14)、患者反馈(PA2)
  *          采用轮询方式（Key_Scan 需 10ms 周期调用）
  *          检测逻辑：低电平按下 → 消抖 30ms → 短按 or 长按 800ms
  */
 #include "key.h"
 
-#define KEY_COUNT         3
+#define KEY_COUNT         4
 #define KEY_DEBOUNCE_MS   30
 #define KEY_LONG_PRESS_MS 800
 
@@ -47,6 +47,8 @@ void Key_Init(void)
     keys[KEY_CONFIRM].pin  = GPIO_PIN_14;
     keys[KEY_BACK].port    = GPIOE;
     keys[KEY_BACK].pin     = GPIO_PIN_14;
+    keys[KEY_PATIENT].port = GPIOA;
+    keys[KEY_PATIENT].pin  = GPIO_PIN_2;
 
     for (uint8_t i = 0; i < KEY_COUNT; i++)
     {

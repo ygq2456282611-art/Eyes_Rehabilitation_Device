@@ -69,7 +69,6 @@ void SystemClock_Config(void);
 /* USER CODE BEGIN 0 */
 bmi088_euler_data_t euler_angle;
 float temp;
-static uint8_t prev_alert_active = 0;
 static uint32_t ws2812_alert_tick = 0;
 static uint8_t ws2812_alert_on = 0;
 /* USER CODE END 0 */
@@ -157,29 +156,17 @@ int main(void)
 
         HeadAnalysis_t *head = HeadTracker_GetResult();
 
-        /* 综合报警条件：
-         * - roll  > 20° → 左右转头过度（代偿行为）
-         * - pitch > 20° → 上下低头过度
-         * - yaw   > 30° → 侧倾过度 */
         uint8_t alert_active = 0;
-        if (fabsf(euler_angle.roll) > 20.0f)  alert_active = 1;
+        if (fabsf(euler_angle.roll)  > 20.0f) alert_active = 1;
         if (fabsf(euler_angle.pitch) > 20.0f) alert_active = 1;
-        if (fabsf(euler_angle.yaw) > 30.0f)   alert_active = 1;
-
-        /* 蜂鸣器：刚进入报警状态时响两声 */
-        if (alert_active && !prev_alert_active)
-        {
-            Buzzer_Alert(2, 150, 100);
-        }
-        prev_alert_active = alert_active;
+        if (fabsf(euler_angle.yaw)   > 30.0f) alert_active = 1;
 
         /* WS2812：报警态红色闪烁，正常态绿色呼吸 */
         if (alert_active)
         {
-            uint32_t now = HAL_GetTick();
-            if (now - ws2812_alert_tick >= 1000)
+            if (HAL_GetTick() - ws2812_alert_tick >= 1000)
             {
-                ws2812_alert_tick = now;
+                ws2812_alert_tick = HAL_GetTick();
                 ws2812_alert_on = !ws2812_alert_on;
             }
             WS2812_Set(ws2812_alert_on ? 255 : 0, 0, 0);
