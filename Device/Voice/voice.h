@@ -78,5 +78,6 @@ UART_HandleTypeDef* Voice_GetUART(void);
 #define VOICE_CMD_WAKE_RESUME   0x86  /* 继续训练 (TYPE=0x06) */
 #define VOICE_CMD_WAKE_RESTART  0x89  /* 重新开始 (TYPE=0x09) */
 #define VOICE_CMD_WAKE_SKIP     0x8A  /* 跳过这个 (TYPE=0x0A) */
+#define VOICE_CMD_WAKE_HELLO    0x83  /* 你好小盈 (TYPE=0x03) 统一中断 */
 
 #endif

@@ -114,6 +114,41 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
     /* ===== 全局命令处理（唤醒词区 TYPE=0x01~0x0F）===== */
     if (VOICE_CMD_IS_WAKE(cmd))
     {
+        /* "你好小盈" — 统一中断信号，停止一切回到 IDLE_VOICE */
+        if (cmd == VOICE_CMD_WAKE_HELLO)
+        {
+            if (sys_state == SYS_TRAIN || sys_state == SYS_PAUSE)
+            {
+                Laser_Off();
+                Servo_SetAngle(SERVO_AXIS_X, 90);
+                Servo_SetAngle(SERVO_AXIS_Y, 90);
+                Voice_Play(0xFF, VOICE_TTS_POSTURE);
+            }
+            sys_state = SYS_IDLE_VOICE;
+            pause_voice_played = 0;
+            pause_stable_tick = 0;
+            return;
+        }
+
+        /* "继续训练" — 从 IDLE_VOICE 恢复之前的训练 */
+        if (cmd == VOICE_CMD_WAKE_RESUME)
+        {
+            if (sys_state == SYS_PAUSE)
+            {
+                Voice_Play(0xFF, VOICE_TTS_CONTINUE);
+                pause_voice_played  = 0;
+                pause_stable_tick   = 0;
+                sys_state = SYS_TRAIN;
+                return;
+            }
+            if (sys_state == SYS_IDLE_VOICE)
+            {
+                sys_state = SYS_TRAIN;
+                return;
+            }
+        }
+
+        /* 其他唤醒词命令按状态处理 */
         switch (sys_state)
         {
             case SYS_TRAIN:
@@ -142,14 +177,6 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
                 break;
 
             case SYS_PAUSE:
-                if (cmd == VOICE_CMD_WAKE_RESUME)
-                {
-                    Voice_Play(0xFF, VOICE_TTS_CONTINUE);
-                    pause_voice_played  = 0;
-                    pause_stable_tick   = 0;
-                    sys_state = SYS_TRAIN;
-                    return;
-                }
                 if (cmd == VOICE_CMD_WAKE_SKIP)
                 {
                     record.end_tick = HAL_GetTick();
@@ -229,11 +256,11 @@ static void App_State_Calibrate(void)
 {
     Voice_Play(0x00, VOICE_CMD_CALIB_STILL);
     voice_cooldown = HAL_GetTick();
-    HAL_Delay(2500);
+    HAL_Delay(3500);
     BMI088_euler_init();
     Voice_Play(0xFF, VOICE_TTS_CALIB_DONE);
     voice_cooldown = HAL_GetTick();
-    HAL_Delay(1500);
+    HAL_Delay(2500);
     App_Transition(SYS_TRAIN);
 }
 
@@ -411,142 +438,8 @@ static void App_Transition(SystemState_t next_state)
         pause_voice_played = 0;
         voice_cooldown = 0;
 
-        /* 播报当前模式 */
-        Voice_Play(0x00, mode_voice_id[train_mode]);
-        voice_cooldown = HAL_GetTick();
-        HAL_Delay(3000);
-    }
-
-    if (next_state == SYS_IDLE_VOICE)
-    {
-        Laser_Off();
-        LED_Off(LED_FOCUS);
-        LED_Off(LED_STATUS);
-    }
-}
-
-/* ==================== 五种训练模式 ==================== */
-
-/**
- * @brief  A — 注视稳定性训练
- *         激光固定点，患者注视 15 秒，检测头稳指标
- */
-static void Train_Fixation(void)
-{
-    uint32_t now = HAL_GetTick();
-    uint32_t elapsed = now - timebase;
-
-    Laser_On();
-    LED_On(LED_FOCUS);
-
-    HeadAnalysis_t *head = HeadTracker_GetResult();
-    if (head->head_stability > 5.0f)
-    {
-        if (HAL_GetTick() - voice_cooldown > 3000)
-        {
-            Voice_Play(0xFF, VOICE_TTS_KEEP_STILL);
-            voice_cooldown = HAL_GetTick();
-            HAL_Delay(500);
-        }
-    }
-
-    if (elapsed > 15000)
-    {
-        Laser_Off();
-        LED_Off(LED_FOCUS);
-        record.end_tick = now;
-        record.avg_head_stability = head->head_stability;
-        record.completed = 1;
-        App_Transition(SYS_FEEDBACK);
-    }
-}
-
-/**
- * @brief  B — 扫视训练
- *         激光 4 位置随机跳变 × 8 次
- *         患者看到激光按 PA2 确认 → 记录反应时间
- */
-static void Train_Saccade(void)
-{
-    uint32_t now = HAL_GetTick();
-
-    if (saccade_count == 0)
-    {
-        saccade_count = 8;
-        for (uint8_t i = 0; i < saccade_count; i++)
-            saccade_seq[i] = i % 4;
-        for (uint8_t i = saccade_count - 1; i > 0; i--)
-        {
-            uint8_t j = (uint8_t)(HAL_GetTick() % (i + 1));
-            uint8_t tmp = saccade_seq[i];
-            saccade_seq[i] = saccade_seq[j];
-            saccade_seq[j] = tmp;
-        }
-        saccade_idx = 0;
-    }
-
-    if (saccade_light_on_tick == 0)
-    {
-        if (saccade_idx >= saccade_count)
-        {
-            record.end_tick = now;
-            record.completed = 1;
-            App_Transition(SYS_FEEDBACK);
-            return;
-        }
-
-        current_target = saccade_seq[saccade_idx];
-        uint8_t x_angle = 45, y_angle = 60;
-        switch (current_target)
-        {
-            case 0: x_angle = 45;  y_angle = 60;  break;
-            case 1: x_angle = 135; y_angle = 60;  break;
-            case 2: x_angle = 45;  y_angle = 120; break;
-            case 3: x_angle = 135; y_angle = 120; break;
-        }
-
-        Servo_SetAngle(SERVO_AXIS_X, x_angle);
-        Servo_SetAngle(SERVO_AXIS_Y, y_angle);
-        HAL_Delay(100);
-        Laser_On();
-        saccade_light_on_tick = now;
-        trial_start_tick = now;
-        trial_result = 0;
-        record.total_trials++;
-    }
-
-    /* 患者 PA2 按键确认 */
-    if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT && trial_result == 0)
-    {
-        trial_result = 1;
-        record.correct_trials++;
-        record.avg_reaction_ms += (float)(now - trial_start_tick);
-        Laser_Off();
-        saccade_streak++;
-        if (saccade_streak >= 3)
-        {
-            Voice_Play(0xFF, VOICE_TTS_STREAK);
-            saccade_streak = 0;
-        }
-        else
-        {
-            Voice_Play(0xFF, VOICE_TTS_CORRECT);
-        }
-        voice_cooldown = HAL_GetTick();
-        HAL_Delay(1000);
-        saccade_light_on_tick = 0;
-        saccade_idx++;
-        HAL_Delay(500);
-    }
-
-    /* 3 秒超时 */
-    if (now - saccade_light_on_tick > 3000 && trial_result == 0)
-    {
-        saccade_streak = 0;
-        Laser_Off();
-        Voice_Play(0xFF, VOICE_TTS_TIMEOUT);
-        voice_cooldown = HAL_GetTick();
-        HAL_Delay(800);
+        /* 模式播报由模块自动响应语音命令词完成，MCU 只需等待即可 */
+        HAL_Delay(1200);
         saccade_light_on_tick = 0;
         saccade_idx++;
         HAL_Delay(500);
