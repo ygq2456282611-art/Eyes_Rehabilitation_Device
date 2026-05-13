@@ -129,7 +129,9 @@ void Voice_Play(uint8_t type, uint8_t id)
 
 /**
  * @brief  获取最新识别的语音命令 ID
- * @return 0 = 无新命令；非 0 = 命令词 ID
+ * @return 0          = 无新命令
+ *         0x01~0x0F  = TYPE=0x00 命令词的 ID（训练模式等）
+ *         0x81~0x8F  = TYPE=0x01~0x0F 唤醒词命令（暂停/继续等）
  *         每帧只返回一次，调用后自动清除就绪标志
  */
 uint8_t Voice_GetCommand(void)
@@ -137,7 +139,10 @@ uint8_t Voice_GetCommand(void)
     if (rx_frame_ready)
     {
         rx_frame_ready = 0;
-        return rx_frame_id;
+        if (rx_frame_type == 0x00)
+            return rx_frame_id;
+        else
+            return 0x80 | rx_frame_type;
     }
     return 0;
 }

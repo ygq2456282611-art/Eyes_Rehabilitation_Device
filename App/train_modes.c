@@ -74,7 +74,6 @@ static const uint8_t mode_voice_id[MODE_COUNT] = {
 };
 
 /* 内部函数 */
-static void App_State_IdleVoice(void);
 static void App_State_Calibrate(void);
 static void App_State_Train(void);
 static void App_State_Feedback(void);
@@ -103,14 +102,85 @@ void App_Init(void)
 
 /**
  * @brief  应用主运行函数（每 10ms 主循环调用）
+ *         全局处理语音命令 + 状态分发
  */
 void App_Run(bmi088_euler_data_t *euler, float temp)
 {
     (void)temp; (void)euler;
 
+    /* 读取语音命令 */
+    uint8_t cmd = Voice_GetCommand();
+
+    /* ===== 全局命令处理（唤醒词区 TYPE=0x01~0x0F）===== */
+    if (VOICE_CMD_IS_WAKE(cmd))
+    {
+        switch (sys_state)
+        {
+            case SYS_TRAIN:
+                if (cmd == VOICE_CMD_WAKE_PAUSE)
+                {
+                    Voice_Play(0xFF, VOICE_TTS_POSTURE);
+                    Buzzer_Alert(2, 150, 100);
+                    Laser_Off();
+                    Servo_SetAngle(SERVO_AXIS_X, 90);
+                    Servo_SetAngle(SERVO_AXIS_Y, 90);
+                    sys_state = SYS_PAUSE;
+                    return;
+                }
+                if (cmd == VOICE_CMD_WAKE_RESTART)
+                {
+                    App_Transition(SYS_CALIBRATE);
+                    return;
+                }
+                if (cmd == VOICE_CMD_WAKE_SKIP)
+                {
+                    record.end_tick = HAL_GetTick();
+                    record.completed = 1;
+                    App_Transition(SYS_FEEDBACK);
+                    return;
+                }
+                break;
+
+            case SYS_PAUSE:
+                if (cmd == VOICE_CMD_WAKE_RESUME)
+                {
+                    Voice_Play(0xFF, VOICE_TTS_CONTINUE);
+                    pause_voice_played  = 0;
+                    pause_stable_tick   = 0;
+                    sys_state = SYS_TRAIN;
+                    return;
+                }
+                if (cmd == VOICE_CMD_WAKE_SKIP)
+                {
+                    record.end_tick = HAL_GetTick();
+                    record.completed = 1;
+                    App_Transition(SYS_FEEDBACK);
+                    return;
+                }
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    /* ===== 命令词处理（TYPE=0x00，仅在 IDLE_VOICE 中有效）===== */
+    if (cmd > 0 && !VOICE_CMD_IS_WAKE(cmd))
+    {
+        if (sys_state == SYS_IDLE_VOICE &&
+            cmd >= VOICE_CMD_FIXATION && cmd <= VOICE_CMD_NEGLECT)
+        {
+            train_mode = (TrainMode_t)(cmd - VOICE_CMD_FIXATION);
+            HAL_Delay(600);
+            App_Transition(SYS_CALIBRATE);
+            return;
+        }
+    }
+
+    /* ===== 状态机分发 ===== */
     switch (sys_state)
     {
-        case SYS_IDLE_VOICE: App_State_IdleVoice(); break;
+        case SYS_IDLE_VOICE: break;  /* 无命令时静默等待 */
         case SYS_CALIBRATE:  App_State_Calibrate(); break;
         case SYS_TRAIN:      App_SafetyCheck(); App_State_Train(); break;
         case SYS_FEEDBACK:   App_State_Feedback();  break;
@@ -122,6 +192,11 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
 SystemState_t App_GetState(void) { return sys_state; }
 TrainMode_t   App_GetMode(void)  { return train_mode; }
 TrainingRecord_t App_GetRecord(void) { return record; }
+
+/**
+ * @brief  IDLE_VOICE — 语音命令在 App_Run 中全局处理
+ *         此状态不做任何事，静默等待即可
+ */
 
 /**
  * @brief  IDLE_VOICE — 语音命令等待
@@ -198,7 +273,7 @@ static void App_State_Feedback(void)
                 Voice_Play(0xFF, VOICE_TTS_FIX_FAIR);
             else
                 Voice_Play(0xFF, VOICE_TTS_FIX_POOR);
-            HAL_Delay(3000);
+            HAL_Delay(8000);
             break;
 
         case MODE_B_SACCADE:
@@ -218,7 +293,7 @@ static void App_State_Feedback(void)
                 Voice_Play(0xFF, VOICE_TTS_RESULT_GOOD);
             else
                 Voice_Play(0xFF, VOICE_TTS_RESULT_TRY);
-            HAL_Delay(3000);
+            HAL_Delay(8000);
             break;
         }
 
@@ -227,16 +302,16 @@ static void App_State_Feedback(void)
                 Voice_Play(0xFF, VOICE_TTS_PUR_HEAD);
             else
                 Voice_Play(0xFF, VOICE_TTS_PUR_GOOD);
-            HAL_Delay(3000);
+            HAL_Delay(8000);
             break;
 
         default:
             Voice_Play(0xFF, VOICE_TTS_TRAIN_DONE);
-            HAL_Delay(3000);
+            HAL_Delay(8000);
             break;
     }
 
-    if (completed_modes >= 4)
+    if (completed_modes >= 5)
     {
         Voice_Play(0xFF, VOICE_TTS_ALL_DONE);
         HAL_Delay(4000);
@@ -595,7 +670,7 @@ static void Train_Neglect(void)
         Voice_Play(0xFF, VOICE_TTS_FOUND_SIDE);
         voice_cooldown = HAL_GetTick();
         neglect_trial_tick = 0;
-        HAL_Delay(2000);
+        HAL_Delay(2500);
         return;
     }
 
@@ -610,7 +685,7 @@ static void Train_Neglect(void)
         return;
     }
 
-    if (neglect_trial_count >= 10)
+    if (neglect_trial_count >= 6)
     {
         record.end_tick = now;
         record.completed = 1;

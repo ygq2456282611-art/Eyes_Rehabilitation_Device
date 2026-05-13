@@ -71,4 +71,12 @@ void Voice_SendFrame(uint8_t type, uint8_t id);
 uint8_t Voice_GetCommand(void);
 UART_HandleTypeDef* Voice_GetUART(void);
 
+/* Voice_GetCommand() 的特殊返回值（唤醒词区命令） */
+#define VOICE_CMD_FROM_WAKE(t)  (0x80 | (t))
+#define VOICE_CMD_IS_WAKE(cmd)  ((cmd) >= 0x80)
+#define VOICE_CMD_WAKE_PAUSE    0x81  /* 暂停训练 (TYPE=0x01) */
+#define VOICE_CMD_WAKE_RESUME   0x86  /* 继续训练 (TYPE=0x06) */
+#define VOICE_CMD_WAKE_RESTART  0x89  /* 重新开始 (TYPE=0x09) */
+#define VOICE_CMD_WAKE_SKIP     0x8A  /* 跳过这个 (TYPE=0x0A) */
+
 #endif
