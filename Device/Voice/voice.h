@@ -1,58 +1,70 @@
-/**
- * @file    voice.h
- * @brief   亚博 AI 语音交互模块 (CI1302) 驱动 —— 公共接口与命令词定义
- *          基于 UART（115200, 8N1）与模块通信
- *
- * @section 通信协议
- *           帧格式：AA 55 [TYPE] [ID] FB
- *           - TYPE=0x01/0x02 : 唤醒词
- *           - TYPE=0x00      : 语音命令（MCU触发，模块播报关联内容）
- *           - TYPE=0xFF      : 播报TTS（MCU触发纯文本播报）
- *
- * @section 接线
- *           PE8 (UART7_TX) → 模块 RX
- *           PE7 (UART7_RX) → 模块 TX（可选，用于接收识别结果）
- */
 #ifndef VOICE_H
 #define VOICE_H
 
 #include "main.h"
 
-/* ========================================================================
- * 命令词 ID 定义（对应 2026-05-11 新固件协议）
- * 固件通信协议：
- *   <welcome>    : AA 55 01 00 FB
- *   <inactivate> : AA 55 02 6F FB
- *   你好小幻     : AA 55 03 00 FB
- *   ...
- *   关闭播报     : AA 55 0A 00 FB
- * ======================================================================== */
-
-/* -------- 语音命令（TYPE=0x00，发送 AA 55 00 XX FB） -------- */
+/* ===== 语音命令（TYPE=0x00, AA 55 00 XX FB）===== */
 #define VOICE_CMD_CALIB_STILL   0x01  /* 校准静态 */
 #define VOICE_CMD_FIXATION      0x02  /* 注视稳定训练 */
 #define VOICE_CMD_SACCADE       0x03  /* 扫视训练 */
 #define VOICE_CMD_PURSUIT       0x04  /* 平稳追踪训练 */
 #define VOICE_CMD_FOCUS         0x05  /* 视觉聚焦训练 */
 #define VOICE_CMD_NEGLECT       0x06  /* 空间忽略训练 */
+#define VOICE_CMD_PAUSE         0x07  /* 暂停训练 */
+#define VOICE_CMD_RESUME        0x08  /* 继续训练 */
+#define VOICE_CMD_RESTART       0x09  /* 重新开始 */
+#define VOICE_CMD_SKIP          0x0A  /* 跳过这个 */
 
-/* -------- 播报命令（TYPE=0xFF，发送 AA 55 FF XX FB） -------- */
+/* ===== TTS播报（TYPE=0xFF, AA 55 FF XX FB）===== */
+
+/* 基础反馈 0x01-0x0B */
 #define VOICE_TTS_CALIB_DONE    0x01  /* 校准完成 */
 #define VOICE_TTS_KEEP_STILL    0x02  /* 请保持头部稳定 */
-#define VOICE_TTS_CORRECT       0x03  /* 正确 / 答得很棒 */
-#define VOICE_TTS_TIMEOUT       0x04  /* 超时 */
+#define VOICE_TTS_CORRECT       0x03  /* 答得很棒 */
+#define VOICE_TTS_TIMEOUT       0x04  /* 时间到咯，再试一次 */
 #define VOICE_TTS_MISS          0x05  /* 错过，请注意该位置 */
-#define VOICE_TTS_EYE_ONLY      0x06  /* 姿态监测异常 / 请用眼睛转 */
+#define VOICE_TTS_EYE_ONLY      0x06  /* 请用眼睛跟踪，不要转头 */
 #define VOICE_TTS_FIND_LIGHT    0x07  /* 请寻找光点 */
-#define VOICE_TTS_NEGLECT_HINT  0x08  /* 空间忽略提示 */
+#define VOICE_TTS_NEGLECT_HINT  0x08  /* 超时，请多注意该侧空间 */
 #define VOICE_TTS_INIT_OK       0x09  /* 初始化完成 */
-#define VOICE_TTS_TRAIN_DONE    0x0A  /* 训练结束 */
+#define VOICE_TTS_TRAIN_DONE    0x0A  /* 训练结束，太棒了 */
 #define VOICE_TTS_WELCOME       0x0B  /* 欢迎 */
 
+/* 训练结果分级评价 0x0C-0x0E */
+#define VOICE_TTS_RESULT_GREAT  0x0C  /* 表现非常出色，继续加油 */
+#define VOICE_TTS_RESULT_GOOD   0x0D  /* 表现不错，再接再厉 */
+#define VOICE_TTS_RESULT_TRY    0x0E  /* 还需努力，别灰心 */
 
-/* ========================================================================
- * 函数声明
- * ======================================================================== */
+/* 康复激励 0x0F-0x14 */
+#define VOICE_TTS_CONTINUE      0x0F  /* 继续训练 */
+#define VOICE_TTS_ENCOURAGE     0x10  /* 加油，您做得很好 */
+#define VOICE_TTS_HALFWAY       0x11  /* 已完成一半，坚持住 */
+#define VOICE_TTS_STREAK        0x12  /* 连续正确，保持状态 */
+#define VOICE_TTS_RELAX         0x13  /* 不要太着急，慢慢来 */
+#define VOICE_TTS_BREATHE       0x14  /* 请放松肩膀，自然呼吸 */
+
+/* 过渡衔接 0x15-0x16 */
+#define VOICE_TTS_NEXT_PREP     0x15  /* 请稍事休息，准备下一个训练 */
+#define VOICE_TTS_ALL_DONE      0x16  /* 全部训练完成，您辛苦了 */
+
+/* 指导纠错 0x17-0x1C */
+#define VOICE_TTS_POSTURE       0x17  /* 训练暂停，请调整坐姿 */
+#define VOICE_TTS_EYES_NOHEAD   0x18  /* 请用眼睛去寻找，头部不要转动 */
+#define VOICE_TTS_LEFT_SIDE     0x19  /* 请注意左侧空间 */
+#define VOICE_TTS_RIGHT_SIDE    0x1A  /* 请注意右侧空间 */
+#define VOICE_TTS_FOUND_SIDE    0x1B  /* 很好，您发现了患侧的光点 */
+#define VOICE_TTS_FOCUS_NOW     0x1C  /* 请集中注意力看光点 */
+
+/* 专项评价 0x1D-0x23 */
+#define VOICE_TTS_FIX_GOOD      0x1D  /* 注视训练完成，头部稳定性良好 */
+#define VOICE_TTS_FIX_FAIR      0x1E  /* 注视训练完成，头部稳定性一般 */
+#define VOICE_TTS_FIX_POOR      0x1F  /* 注视训练完成，稳定性较差需加强 */
+#define VOICE_TTS_REACT_FAST    0x20  /* 反应速度很快，非常棒 */
+#define VOICE_TTS_REACT_SLOW    0x21  /* 反应速度还需提升，继续练习 */
+#define VOICE_TTS_PUR_GOOD      0x22  /* 追踪训练完成，跟踪能力良好 */
+#define VOICE_TTS_PUR_HEAD      0x23  /* 追踪训练完成，尝试减少转头 */
+
+/* 函数 */
 void Voice_Init(void);
 void Voice_Play(uint8_t type, uint8_t id);
 void Voice_SendFrame(uint8_t type, uint8_t id);
