@@ -101,14 +101,11 @@ void Servo_Test(void)
     Servo_SetAngle(SERVO_AXIS_X, 45);  HAL_Delay(500);
     Servo_SetAngle(SERVO_AXIS_X, 90);  HAL_Delay(500);
     Servo_SetAngle(SERVO_AXIS_X, 135); HAL_Delay(500);
-    Servo_SetAngle(SERVO_AXIS_X, 180); HAL_Delay(500);
     Servo_SetAngle(SERVO_AXIS_X, 90);  HAL_Delay(300);
 
     /* Y轴测试：X轴保持居中 */
-    Servo_SetAngle(SERVO_AXIS_Y, 0);   HAL_Delay(500);
-    Servo_SetAngle(SERVO_AXIS_Y, 45);  HAL_Delay(500);
-    Servo_SetAngle(SERVO_AXIS_Y, 90);  HAL_Delay(500);
-    Servo_SetAngle(SERVO_AXIS_Y, 135); HAL_Delay(500);
-    Servo_SetAngle(SERVO_AXIS_Y, 180); HAL_Delay(500);
+    Servo_SetAngle(SERVO_AXIS_Y, 90);  HAL_Delay(1000);
+    Servo_SetAngle(SERVO_AXIS_Y, 125);  HAL_Delay(1000);
+    Servo_SetAngle(SERVO_AXIS_Y, 150);  HAL_Delay(1000);
     Servo_SetAngle(SERVO_AXIS_Y, 90);
 }

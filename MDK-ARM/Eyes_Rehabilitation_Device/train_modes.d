@@ -33,4 +33,4 @@ eyes_rehabilitation_device/train_modes.o: ..\App\train_modes.c \
   ..\Device\BMI088\inc\BMI088driver.h ..\Device\Servo\servo.h \
   ..\Core\Inc\tim.h ..\Device\Voice\voice.h ..\Device\Laser\laser.h \
   ..\Device\Key\key.h ..\Device\LED\led.h \
-  ..\Device\HeadTracker\head_tracker.h
+  ..\Device\HeadTracker\head_tracker.h ..\Device\Buzzer\buzzer.h

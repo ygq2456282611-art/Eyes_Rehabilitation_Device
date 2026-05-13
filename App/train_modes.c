@@ -447,6 +447,132 @@ static void App_Transition(SystemState_t next_state)
 }
 
 /**
+ * @brief  A — 注视稳定性训练
+ *         激光固定点，患者注视 15 秒，检测头稳指标
+ */
+static void Train_Fixation(void)
+{
+    uint32_t now = HAL_GetTick();
+    uint32_t elapsed = now - timebase;
+
+    Laser_On();
+    LED_On(LED_FOCUS);
+
+    HeadAnalysis_t *head = HeadTracker_GetResult();
+    if (head->head_stability > 5.0f)
+    {
+        if (HAL_GetTick() - voice_cooldown > 3000)
+        {
+            Voice_Play(0xFF, VOICE_TTS_KEEP_STILL);
+            voice_cooldown = HAL_GetTick();
+            HAL_Delay(500);
+        }
+    }
+
+    if (elapsed > 15000)
+    {
+        Laser_Off();
+        LED_Off(LED_FOCUS);
+        record.end_tick = now;
+        record.avg_head_stability = head->head_stability;
+        record.completed = 1;
+        App_Transition(SYS_FEEDBACK);
+    }
+}
+
+/**
+ * @brief  B — 扫视训练
+ *         激光 4 位置随机跳变 × 8 次
+ *         患者看到激光按 PA2 确认 → 记录反应时间
+ */
+static void Train_Saccade(void)
+{
+    uint32_t now = HAL_GetTick();
+
+    if (saccade_count == 0)
+    {
+        saccade_count = 8;
+        for (uint8_t i = 0; i < saccade_count; i++)
+            saccade_seq[i] = i % 4;
+        for (uint8_t i = saccade_count - 1; i > 0; i--)
+        {
+            uint8_t j = (uint8_t)(HAL_GetTick() % (i + 1));
+            uint8_t tmp = saccade_seq[i];
+            saccade_seq[i] = saccade_seq[j];
+            saccade_seq[j] = tmp;
+        }
+        saccade_idx = 0;
+    }
+
+    if (saccade_light_on_tick == 0)
+    {
+        if (saccade_idx >= saccade_count)
+        {
+            record.end_tick = now;
+            record.completed = 1;
+            App_Transition(SYS_FEEDBACK);
+            return;
+        }
+
+        current_target = saccade_seq[saccade_idx];
+        uint8_t x_angle = 45, y_angle = 60;
+        switch (current_target)
+        {
+            case 0: x_angle = 45;  y_angle = 60;  break;
+            case 1: x_angle = 135; y_angle = 60;  break;
+            case 2: x_angle = 45;  y_angle = 120; break;
+            case 3: x_angle = 135; y_angle = 120; break;
+        }
+
+        Servo_SetAngle(SERVO_AXIS_X, x_angle);
+        Servo_SetAngle(SERVO_AXIS_Y, y_angle);
+        HAL_Delay(100);
+        Laser_On();
+        saccade_light_on_tick = now;
+        trial_start_tick = now;
+        trial_result = 0;
+        record.total_trials++;
+    }
+
+    /* 患者 PA2 按键确认 */
+    if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT && trial_result == 0)
+    {
+        trial_result = 1;
+        record.correct_trials++;
+        record.avg_reaction_ms += (float)(now - trial_start_tick);
+        Laser_Off();
+        saccade_streak++;
+        if (saccade_streak >= 3)
+        {
+            Voice_Play(0xFF, VOICE_TTS_STREAK);
+            saccade_streak = 0;
+        }
+        else
+        {
+            Voice_Play(0xFF, VOICE_TTS_CORRECT);
+        }
+        voice_cooldown = HAL_GetTick();
+        HAL_Delay(1000);
+        saccade_light_on_tick = 0;
+        saccade_idx++;
+        HAL_Delay(500);
+    }
+
+    /* 3 秒超时 */
+    if (now - saccade_light_on_tick > 3000 && trial_result == 0)
+    {
+        saccade_streak = 0;
+        Laser_Off();
+        Voice_Play(0xFF, VOICE_TTS_TIMEOUT);
+        voice_cooldown = HAL_GetTick();
+        HAL_Delay(1000);
+        saccade_light_on_tick = 0;
+        saccade_idx++;
+        HAL_Delay(500);
+    }
+}
+
+/**
  * @brief  C — 平稳追踪训练
  *         激光连续移动（水平→斜线→圆）× 30 秒
  */
