@@ -10,7 +10,8 @@
 #define VOICE_CMD_PURSUIT       0x04  /* 平稳追踪训练 */
 #define VOICE_CMD_FOCUS         0x05  /* 视觉聚焦训练 */
 #define VOICE_CMD_NEGLECT       0x06  /* 空间忽略训练 */
-#define VOICE_CMD_PAUSE         0x07  /* 暂停训练 */
+#define VOICE_CMD_CALIB_MODE    0x07  /* 标定模式 */
+#define VOICE_CMD_PAUSE         0x08  /* 暂停训练 */
 #define VOICE_CMD_RESUME        0x08  /* 继续训练 */
 #define VOICE_CMD_RESTART       0x09  /* 重新开始 */
 #define VOICE_CMD_SKIP          0x0A  /* 跳过这个 */

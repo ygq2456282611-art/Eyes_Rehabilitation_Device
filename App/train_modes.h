@@ -28,6 +28,7 @@ typedef enum {
     SYS_TRAIN      = 2,  /* 训练执行中 */
     SYS_FEEDBACK   = 3,  /* 反馈：播报结果 → 回到 IDLE */
     SYS_PAUSE      = 4,  /* 暂停：姿态异常，自动恢复 */
+    SYS_CALIB_SERVO= 5,  /* 常驻标定：按键标记视野边界 */
 } SystemState_t;
 
 typedef struct {

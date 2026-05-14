@@ -135,7 +135,6 @@ int main(void)
     App_Init();
     Buzzer_Init();
     WS2812_Init();
-    // Calibrate_ServoRange();  /* ← 标定舵机角度范围，测完后注释 */
     Voice_Init();
     
     Buzzer_Alert(3, 200, 100);
@@ -159,7 +158,7 @@ int main(void)
         HAL_Delay(10);
     }
     /* ================================== */
-
+    //Calibrate_ServoRange();  /* 标定模式已改为语音命令触发 */
   /* USER CODE END 2 */
 
   /* Infinite loop */

@@ -72,6 +72,16 @@ static uint8_t  completed_modes  = 0;
 /* 扫视连续正确计数 */
 static uint8_t  saccade_streak   = 0;
 
+/* 标定模式状态 */
+static uint8_t  calib_phase    = 0;   /* 0=start 1=X_right 2=X_left 3=Y_btm 4=Y_top 5=done */
+static uint8_t  calib_angle    = 70;  /* 当前扫描角度（从70°开始） */
+static uint32_t calib_tick     = 0;   /* 步进计时 */
+static uint8_t  calib_pressed  = 0;   /* 当前相位内按键次数 */
+static uint8_t  calib_x_right  = 0;   /* X右边界暂存 */
+static uint8_t  calib_x_left   = 0;   /* X左边界暂存 */
+static uint8_t  calib_y_bottom = 0;   /* Y底边界暂存 */
+static uint8_t  calib_y_top    = 0;   /* Y顶边界暂存 */
+
 /* ===== 模式名语音 ID 映射 ===== */
 static const uint8_t mode_voice_id[MODE_COUNT] = {
     VOICE_CMD_FIXATION,  /* A */
@@ -95,6 +105,7 @@ static void Train_Neglect(void);
 
 static void App_Transition(SystemState_t next_state);
 static void App_SafetyCheck(void);
+static void State_CalibServo(void);
 void Calibrate_ServoRange(void);
 
 /**
@@ -203,24 +214,34 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
     /* ===== 命令词处理（TYPE=0x00，仅在 IDLE_VOICE 中有效）===== */
     if (cmd > 0 && !VOICE_CMD_IS_WAKE(cmd))
     {
-        if (sys_state == SYS_IDLE_VOICE &&
-            cmd >= VOICE_CMD_FIXATION && cmd <= VOICE_CMD_NEGLECT)
+        if (sys_state == SYS_IDLE_VOICE)
         {
-            train_mode = (TrainMode_t)(cmd - VOICE_CMD_FIXATION);
-            HAL_Delay(600);
-            App_Transition(SYS_CALIBRATE);
-            return;
+            if (cmd >= VOICE_CMD_CALIB_MODE && cmd <= VOICE_CMD_CALIB_MODE)
+            {
+                calib_phase   = 0;
+                calib_pressed = 0;
+                sys_state = SYS_CALIB_SERVO;
+                return;
+            }
+            if (cmd >= VOICE_CMD_FIXATION && cmd <= VOICE_CMD_NEGLECT)
+            {
+                train_mode = (TrainMode_t)(cmd - VOICE_CMD_FIXATION);
+                HAL_Delay(600);
+                App_Transition(SYS_CALIBRATE);
+                return;
+            }
         }
     }
 
     /* ===== 状态机分发 ===== */
     switch (sys_state)
     {
-        case SYS_IDLE_VOICE: break;  /* 无命令时静默等待 */
+        case SYS_IDLE_VOICE: break;
         case SYS_CALIBRATE:  App_State_Calibrate(); break;
         case SYS_TRAIN:      App_SafetyCheck(); App_State_Train(); break;
         case SYS_FEEDBACK:   App_State_Feedback();  break;
         case SYS_PAUSE:      App_State_Pause();     break;
+        case SYS_CALIB_SERVO: State_CalibServo();   break;
     }
 }
 
@@ -730,35 +751,149 @@ static void Train_Neglect(void)
 }
 
 /**
- * @brief  舵机角度范围标定
- *         逐步扫描 X 轴和 Y 轴，每步停留 2 秒供观察激光点位置
- *         观察结果填入 CALIB_X_MIN/MAX, CALIB_Y_MIN/MAX
+ * @brief  常驻标定模式 — 按键标记视野边界
+ *         语音命令「标定模式」触发，先标X轴（从70°向右扫描→按PA2标记边界）
+ *         再标Y轴（向上扫描→按PA2标记边界），最后回到IDLE_VOICE
  *
- *         在 main.c 初始化末尾取消注释即可运行。
- *         标定完成后注释掉，训练模式自动使用新边界值。
+ *         标定结果直接修改 CALIB_X/Y_MIN/MAX，训练模式自动使用新值。
+ *         不重启则不丢，重启后还原为代码默认值。
+ *
+ *  相序:  0=开始语音 → 1=X右边界 → 2=X左边界 → 3=Y底边 → 4=Y顶边 → 5=完成
+ */
+static void State_CalibServo(void)
+{
+    switch (calib_phase)
+    {
+        case 0:
+            Voice_Play(0xFF, VOICE_TTS_POSTURE);
+            Buzzer_Alert(1, 200, 0);
+            Laser_On();
+            Servo_SetAngle(SERVO_AXIS_Y, 90);
+            Servo_SetAngle(SERVO_AXIS_X, CALIB_X_MAX + 20);
+            calib_angle = 70;
+            calib_pressed = 0;
+            calib_tick = HAL_GetTick();
+            calib_phase = 1;
+            break;
+
+        case 1:  /* X轴向右扫描，记录右边界 */
+        {
+            if (HAL_GetTick() - calib_tick < 100) return;
+            calib_tick = HAL_GetTick();
+            if (calib_angle < 150) calib_angle++;
+            Servo_SetAngle(SERVO_AXIS_X, calib_angle);
+
+            if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT && calib_pressed == 0)
+            {
+                calib_x_right = calib_angle;
+                calib_pressed = 1;
+                Buzzer_Alert(1, 100, 0);
+                Voice_Play(0xFF, VOICE_TTS_CORRECT);
+            }
+            if (calib_pressed == 1 && calib_angle >= 150)
+            {
+                calib_phase = 2;
+                calib_angle = 150;
+                calib_pressed = 0;
+                Voice_Play(0xFF, VOICE_TTS_TIMEOUT);
+                HAL_Delay(500);
+            }
+            break;
+        }
+
+        case 2:  /* X轴继续扫到150，记录左边界 */
+        {
+            if (HAL_GetTick() - calib_tick < 100) return;
+            calib_tick = HAL_GetTick();
+            if (calib_angle > 70) calib_angle--;
+            Servo_SetAngle(SERVO_AXIS_X, calib_angle);
+
+            if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT && calib_pressed == 0)
+            {
+                calib_x_left = calib_angle;
+                calib_pressed = 1;
+                Buzzer_Alert(1, 100, 0);
+                Voice_Play(0xFF, VOICE_TTS_CORRECT);
+            }
+            if (calib_pressed == 1 && calib_angle <= 70)
+            {
+                CALIB_X_MIN = calib_x_right;
+                CALIB_X_MAX = calib_x_left;
+                calib_phase = 3;
+                calib_angle = 80;
+                calib_pressed = 0;
+                Voice_Play(0xFF, VOICE_TTS_NEXT_PREP);
+                HAL_Delay(1500);
+            }
+            break;
+        }
+
+        case 3:  /* Y轴向上扫描，记录底边 */
+        {
+            if (HAL_GetTick() - calib_tick < 100) return;
+            calib_tick = HAL_GetTick();
+            if (calib_angle < 140) calib_angle++;
+            Servo_SetAngle(SERVO_AXIS_Y, calib_angle);
+
+            if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT && calib_pressed == 0)
+            {
+                calib_y_bottom = calib_angle;
+                calib_pressed = 1;
+                Buzzer_Alert(1, 100, 0);
+                Voice_Play(0xFF, VOICE_TTS_CORRECT);
+            }
+            if (calib_pressed == 1 && calib_angle >= 140)
+            {
+                calib_phase = 4;
+                calib_angle = 140;
+                calib_pressed = 0;
+                Voice_Play(0xFF, VOICE_TTS_TIMEOUT);
+                HAL_Delay(500);
+            }
+            break;
+        }
+
+        case 4:  /* Y轴继续扫到140，记录顶边 */
+        {
+            if (HAL_GetTick() - calib_tick < 100) return;
+            calib_tick = HAL_GetTick();
+            if (calib_angle > 80) calib_angle--;
+            Servo_SetAngle(SERVO_AXIS_Y, calib_angle);
+
+            if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT && calib_pressed == 0)
+            {
+                calib_y_top = calib_angle;
+                calib_pressed = 1;
+                Buzzer_Alert(1, 100, 0);
+                Voice_Play(0xFF, VOICE_TTS_CORRECT);
+            }
+            if (calib_pressed == 1 && calib_angle <= 80)
+            {
+                CALIB_Y_MIN = calib_y_bottom;
+                CALIB_Y_MAX = calib_y_top;
+                calib_phase = 5;
+            }
+            break;
+        }
+
+        case 5:
+            Laser_Off();
+            Servo_SetAngle(SERVO_AXIS_X, 90);
+            Servo_SetAngle(SERVO_AXIS_Y, 90);
+            Voice_Play(0xFF, VOICE_TTS_INIT_OK);
+            HAL_Delay(2000);
+            calib_phase = 0;
+            calib_pressed = 0;
+            sys_state = SYS_IDLE_VOICE;
+            break;
+    }
+}
+
+/**
+ * @brief  舵机角度范围标定（旧版自动扫描）
+ *         已废弃，请使用语音命令「标定模式」触发的 State_CalibServo
  */
 void Calibrate_ServoRange(void)
 {
-    Laser_On();
-
-    /* X 轴扫描：从 20° 到 160°，步进 5° */
-    Servo_SetAngle(SERVO_AXIS_Y, 90);
-    for (uint8_t angle = 20; angle <= 160; angle += 5)
-    {
-        Servo_SetAngle(SERVO_AXIS_X, angle);
-        HAL_Delay(2000);
-    }
-    Servo_SetAngle(SERVO_AXIS_X, 90);
-    HAL_Delay(1000);
-
-    /* Y 轴扫描：从 80° 到 160°，步进 5° */
-    for (uint8_t angle = 80; angle <= 160; angle += 5)
-    {
-        Servo_SetAngle(SERVO_AXIS_Y, angle);
-        HAL_Delay(2000);
-    }
-    Servo_SetAngle(SERVO_AXIS_Y, 90);
-    HAL_Delay(1000);
-
-    Laser_Off();
+    State_CalibServo();
 }
