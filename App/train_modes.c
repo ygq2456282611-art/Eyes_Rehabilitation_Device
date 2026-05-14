@@ -56,10 +56,12 @@ static uint32_t pause_stable_tick   = 0;
 static uint8_t  pause_voice_played  = 0;
 
 /* 舵机角度标定参数（由 Calibrate_ServoRange 测量后填入） */
-uint8_t CALIB_X_MIN = 45;    /* X轴舒适区最小角度 */
-uint8_t CALIB_X_MAX = 135;   /* X轴舒适区最大角度 */
-uint8_t CALIB_Y_MIN = 60;    /* Y轴舒适区最小角度 */
-uint8_t CALIB_Y_MAX = 120;   /* Y轴舒适区最大角度 */
+/* X轴：第12步(80°)~第18步(110°)为训练范围 */
+/* Y轴：舒适区约105~110°，取100~115° */
+uint8_t CALIB_X_MIN = 80;    /* X轴训练范围左边界（患者右侧视野） */
+uint8_t CALIB_X_MAX = 110;   /* X轴训练范围右边界（患者左侧视野） */
+uint8_t CALIB_Y_MIN = 100;   /* Y轴训练范围底边 */
+uint8_t CALIB_Y_MAX = 115;   /* Y轴训练范围顶边 */
 
 /* 语音播报冷却计时 */
 static uint32_t voice_cooldown = 0;
@@ -749,8 +751,8 @@ void Calibrate_ServoRange(void)
     Servo_SetAngle(SERVO_AXIS_X, 90);
     HAL_Delay(1000);
 
-    /* Y 轴扫描：从 20° 到 160°，步进 5° */
-    for (uint8_t angle = 20; angle <= 160; angle += 5)
+    /* Y 轴扫描：从 80° 到 160°，步进 5° */
+    for (uint8_t angle = 80; angle <= 160; angle += 5)
     {
         Servo_SetAngle(SERVO_AXIS_Y, angle);
         HAL_Delay(2000);
