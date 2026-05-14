@@ -751,7 +751,7 @@ static void Train_Neglect(void)
 }
 
 /**
- * @brief  常驻标定模式 — 按键标记视野边界
+ * @brief  标定模式 — 按键标记视野边界
  *         语音命令「标定模式」触发，先标X轴（从70°向右扫描→按PA2标记边界）
  *         再标Y轴（向上扫描→按PA2标记边界），最后回到IDLE_VOICE
  *
@@ -765,18 +765,19 @@ static void State_CalibServo(void)
     switch (calib_phase)
     {
         case 0:
-            Voice_Play(0xFF, VOICE_TTS_POSTURE);
-            Buzzer_Alert(1, 200, 0);
+            /* 蜂鸣器两下 + 延迟，给患者准备时间 */
+            Buzzer_Alert(2, 150, 100);
             Laser_On();
             Servo_SetAngle(SERVO_AXIS_Y, 90);
-            Servo_SetAngle(SERVO_AXIS_X, CALIB_X_MAX + 20);
-            calib_angle = 70;
+            Servo_SetAngle(SERVO_AXIS_X, 70);
+            HAL_Delay(2000);
+            calib_angle   = 70;
             calib_pressed = 0;
-            calib_tick = HAL_GetTick();
-            calib_phase = 1;
+            calib_tick    = HAL_GetTick();
+            calib_phase   = 1;
             break;
 
-        case 1:  /* X轴向右扫描，记录右边界 */
+        case 1:  /* X轴向右扫描 → 标记右边界 */
         {
             if (HAL_GetTick() - calib_tick < 100) return;
             calib_tick = HAL_GetTick();
@@ -788,20 +789,17 @@ static void State_CalibServo(void)
                 calib_x_right = calib_angle;
                 calib_pressed = 1;
                 Buzzer_Alert(1, 100, 0);
-                Voice_Play(0xFF, VOICE_TTS_CORRECT);
             }
             if (calib_pressed == 1 && calib_angle >= 150)
             {
-                calib_phase = 2;
-                calib_angle = 150;
+                calib_phase   = 2;
+                calib_angle   = 150;
                 calib_pressed = 0;
-                Voice_Play(0xFF, VOICE_TTS_TIMEOUT);
-                HAL_Delay(500);
             }
             break;
         }
 
-        case 2:  /* X轴继续扫到150，记录左边界 */
+        case 2:  /* X轴向左扫描 → 标记左边界 */
         {
             if (HAL_GetTick() - calib_tick < 100) return;
             calib_tick = HAL_GetTick();
@@ -810,25 +808,24 @@ static void State_CalibServo(void)
 
             if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT && calib_pressed == 0)
             {
-                calib_x_left = calib_angle;
+                calib_x_left  = calib_angle;
                 calib_pressed = 1;
                 Buzzer_Alert(1, 100, 0);
-                Voice_Play(0xFF, VOICE_TTS_CORRECT);
             }
             if (calib_pressed == 1 && calib_angle <= 70)
             {
                 CALIB_X_MIN = calib_x_right;
                 CALIB_X_MAX = calib_x_left;
-                calib_phase = 3;
-                calib_angle = 80;
+                calib_phase   = 3;
+                calib_angle   = 80;
                 calib_pressed = 0;
-                Voice_Play(0xFF, VOICE_TTS_NEXT_PREP);
+                Buzzer_Alert(2, 150, 100);
                 HAL_Delay(1500);
             }
             break;
         }
 
-        case 3:  /* Y轴向上扫描，记录底边 */
+        case 3:  /* Y轴向上扫描 → 标记底边 */
         {
             if (HAL_GetTick() - calib_tick < 100) return;
             calib_tick = HAL_GetTick();
@@ -840,20 +837,17 @@ static void State_CalibServo(void)
                 calib_y_bottom = calib_angle;
                 calib_pressed = 1;
                 Buzzer_Alert(1, 100, 0);
-                Voice_Play(0xFF, VOICE_TTS_CORRECT);
             }
             if (calib_pressed == 1 && calib_angle >= 140)
             {
-                calib_phase = 4;
-                calib_angle = 140;
+                calib_phase   = 4;
+                calib_angle   = 140;
                 calib_pressed = 0;
-                Voice_Play(0xFF, VOICE_TTS_TIMEOUT);
-                HAL_Delay(500);
             }
             break;
         }
 
-        case 4:  /* Y轴继续扫到140，记录顶边 */
+        case 4:  /* Y轴向下扫描 → 标记顶边 */
         {
             if (HAL_GetTick() - calib_tick < 100) return;
             calib_tick = HAL_GetTick();
@@ -865,7 +859,6 @@ static void State_CalibServo(void)
                 calib_y_top = calib_angle;
                 calib_pressed = 1;
                 Buzzer_Alert(1, 100, 0);
-                Voice_Play(0xFF, VOICE_TTS_CORRECT);
             }
             if (calib_pressed == 1 && calib_angle <= 80)
             {
@@ -881,8 +874,8 @@ static void State_CalibServo(void)
             Servo_SetAngle(SERVO_AXIS_X, 90);
             Servo_SetAngle(SERVO_AXIS_Y, 90);
             Voice_Play(0xFF, VOICE_TTS_INIT_OK);
-            HAL_Delay(2000);
-            calib_phase = 0;
+            HAL_Delay(2500);
+            calib_phase   = 0;
             calib_pressed = 0;
             sys_state = SYS_IDLE_VOICE;
             break;
