@@ -55,7 +55,13 @@ static uint8_t  neglect_trial_count = 0;
 static uint32_t pause_stable_tick   = 0;
 static uint8_t  pause_voice_played  = 0;
 
-/* 语音播报冷却计时（防止每 10ms 循环重复触发同一句） */
+/* 舵机角度标定参数（由 Calibrate_ServoRange 测量后填入） */
+uint8_t CALIB_X_MIN = 45;    /* X轴舒适区最小角度 */
+uint8_t CALIB_X_MAX = 135;   /* X轴舒适区最大角度 */
+uint8_t CALIB_Y_MIN = 60;    /* Y轴舒适区最小角度 */
+uint8_t CALIB_Y_MAX = 120;   /* Y轴舒适区最大角度 */
+
+/* 语音播报冷却计时 */
 static uint32_t voice_cooldown = 0;
 
 /* 完成模式计数（用于全部完成播报） */
@@ -87,6 +93,7 @@ static void Train_Neglect(void);
 
 static void App_Transition(SystemState_t next_state);
 static void App_SafetyCheck(void);
+void Calibrate_ServoRange(void);
 
 /**
  * @brief  初始化应用层
@@ -515,13 +522,13 @@ static void Train_Saccade(void)
         }
 
         current_target = saccade_seq[saccade_idx];
-        uint8_t x_angle = 45, y_angle = 60;
+        uint8_t x_angle = CALIB_X_MIN, y_angle = CALIB_Y_MIN;
         switch (current_target)
         {
-            case 0: x_angle = 45;  y_angle = 60;  break;
-            case 1: x_angle = 135; y_angle = 60;  break;
-            case 2: x_angle = 45;  y_angle = 120; break;
-            case 3: x_angle = 135; y_angle = 120; break;
+            case 0: x_angle = CALIB_X_MIN; y_angle = CALIB_Y_MIN; break;
+            case 1: x_angle = CALIB_X_MAX; y_angle = CALIB_Y_MIN; break;
+            case 2: x_angle = CALIB_X_MIN; y_angle = CALIB_Y_MAX; break;
+            case 3: x_angle = CALIB_X_MAX; y_angle = CALIB_Y_MAX; break;
         }
 
         Servo_SetAngle(SERVO_AXIS_X, x_angle);
@@ -583,16 +590,24 @@ static void Train_Pursuit(void)
 
     Laser_On();
 
+    uint8_t x_mid   = (CALIB_X_MIN + CALIB_X_MAX) / 2;
+    uint8_t x_amp   = (CALIB_X_MAX - CALIB_X_MIN) / 2;
+    uint8_t y_mid   = (CALIB_Y_MIN + CALIB_Y_MAX) / 2;
+    uint8_t y_amp   = (CALIB_Y_MAX - CALIB_Y_MIN) / 2;
     uint8_t x_angle, y_angle;
+
     switch (pursuit_phase % 3)
     {
-        case 0: x_angle = (uint8_t)(90 + 60 * t); y_angle = 90;
+        case 0: x_angle = (uint8_t)(x_mid + x_amp * t); y_angle = y_mid;
             if (t >= 1.0f) { pursuit_phase++; timebase = now; } break;
-        case 1: x_angle = (uint8_t)(150*(1-t) + 30*t); y_angle = (uint8_t)(60*(1-t) + 120*t);
+        case 1:
+            x_angle = (uint8_t)((CALIB_X_MAX)*(1-t) + CALIB_X_MIN*t);
+            y_angle = (uint8_t)((CALIB_Y_MIN)*(1-t) + CALIB_Y_MAX*t);
             if (t >= 1.0f) { pursuit_phase++; timebase = now; } break;
         case 2:
         { float rad = t * 6.2832f;
-          x_angle = (uint8_t)(90 + 60*cosf(rad)); y_angle = (uint8_t)(90 + 30*sinf(rad));
+          x_angle = (uint8_t)(x_mid + x_amp*cosf(rad));
+          y_angle = (uint8_t)(y_mid + y_amp*sinf(rad));
           if (t >= 1.0f) { pursuit_phase++; timebase = now; } break;
         }
     }
@@ -664,7 +679,7 @@ static void Train_Neglect(void)
     {
         neglect_side = neglect_trial_count & 1;
 
-        Servo_SetAngle(SERVO_AXIS_X, neglect_side ? 150 : 30);
+        Servo_SetAngle(SERVO_AXIS_X, neglect_side ? CALIB_X_MAX : CALIB_X_MIN);
         HAL_Delay(300);
         Laser_On();
         Voice_Play(0xFF, neglect_side ? VOICE_TTS_RIGHT_SIDE : VOICE_TTS_LEFT_SIDE);
@@ -710,4 +725,38 @@ static void Train_Neglect(void)
         record.completed = 1;
         App_Transition(SYS_FEEDBACK);
     }
+}
+
+/**
+ * @brief  舵机角度范围标定
+ *         逐步扫描 X 轴和 Y 轴，每步停留 2 秒供观察激光点位置
+ *         观察结果填入 CALIB_X_MIN/MAX, CALIB_Y_MIN/MAX
+ *
+ *         在 main.c 初始化末尾取消注释即可运行。
+ *         标定完成后注释掉，训练模式自动使用新边界值。
+ */
+void Calibrate_ServoRange(void)
+{
+    Laser_On();
+
+    /* X 轴扫描：从 20° 到 160°，步进 5° */
+    Servo_SetAngle(SERVO_AXIS_Y, 90);
+    for (uint8_t angle = 20; angle <= 160; angle += 5)
+    {
+        Servo_SetAngle(SERVO_AXIS_X, angle);
+        HAL_Delay(2000);
+    }
+    Servo_SetAngle(SERVO_AXIS_X, 90);
+    HAL_Delay(1000);
+
+    /* Y 轴扫描：从 20° 到 160°，步进 5° */
+    for (uint8_t angle = 20; angle <= 160; angle += 5)
+    {
+        Servo_SetAngle(SERVO_AXIS_Y, angle);
+        HAL_Delay(2000);
+    }
+    Servo_SetAngle(SERVO_AXIS_Y, 90);
+    HAL_Delay(1000);
+
+    Laser_Off();
 }

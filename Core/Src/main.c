@@ -135,6 +135,7 @@ int main(void)
     App_Init();
     Buzzer_Init();
     WS2812_Init();
+    // Calibrate_ServoRange();  /* ← 标定舵机角度范围，测完后注释 */
     Voice_Init();
     
     Buzzer_Alert(3, 200, 100);
