@@ -73,14 +73,12 @@ static uint8_t  completed_modes  = 0;
 static uint8_t  saccade_streak   = 0;
 
 /* 标定模式状态 */
-static uint8_t  calib_phase    = 0;   /* 0=start 1=X_right 2=X_left 3=Y_btm 4=Y_top 5=done */
-static uint8_t  calib_angle    = 70;  /* 当前扫描角度（从70°开始） */
+static uint8_t  calib_phase    = 0;   /* 0=start 1/2=X轴两次标记 3/4=Y轴两次标记 5=完成 */
+static uint8_t  calib_angle    = 70;  /* 当前扫描角度 */
 static uint32_t calib_tick     = 0;   /* 步进计时 */
 static uint8_t  calib_pressed  = 0;   /* 当前相位内按键次数 */
-static uint8_t  calib_x_right  = 0;   /* X右边界暂存 */
-static uint8_t  calib_x_left   = 0;   /* X左边界暂存 */
-static uint8_t  calib_y_bottom = 0;   /* Y底边界暂存 */
-static uint8_t  calib_y_top    = 0;   /* Y顶边界暂存 */
+static uint8_t  calib_save1    = 0;   /* 第1次按键角度（不区分左右） */
+static uint8_t  calib_save2    = 0;   /* 第2次按键角度 */
 
 /* ===== 模式名语音 ID 映射 ===== */
 static const uint8_t mode_voice_id[MODE_COUNT] = {
@@ -762,10 +760,11 @@ static void Train_Neglect(void)
  */
 static void State_CalibServo(void)
 {
+    uint8_t v;
+
     switch (calib_phase)
     {
         case 0:
-            /* 蜂鸣器两下 + 延迟，给患者准备时间 */
             Buzzer_Alert(2, 150, 100);
             Laser_On();
             Servo_SetAngle(SERVO_AXIS_Y, 90);
@@ -773,12 +772,14 @@ static void State_CalibServo(void)
             HAL_Delay(2000);
             calib_angle   = 70;
             calib_pressed = 0;
+            calib_save1   = 0;
+            calib_save2   = 0;
             calib_tick    = HAL_GetTick();
             calib_phase   = 1;
             break;
 
-        case 1:  /* X轴向右扫描 → 标记右边界 */
-        {
+        /* ===== X轴标定（70°→150°→70°）===== */
+        case 1:
             if (HAL_GetTick() - calib_tick < 100) return;
             calib_tick = HAL_GetTick();
             if (calib_angle < 150) calib_angle++;
@@ -786,21 +787,20 @@ static void State_CalibServo(void)
 
             if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT && calib_pressed == 0)
             {
-                calib_x_right = calib_angle;
+                calib_save1   = calib_angle;
                 calib_pressed = 1;
                 Buzzer_Alert(1, 100, 0);
             }
-            if (calib_pressed == 1 && calib_angle >= 150)
+            if (calib_angle >= 150)
             {
+                if (calib_pressed == 0) calib_save1 = 110;
                 calib_phase   = 2;
                 calib_angle   = 150;
                 calib_pressed = 0;
             }
             break;
-        }
 
-        case 2:  /* X轴向左扫描 → 标记左边界 */
-        {
+        case 2:
             if (HAL_GetTick() - calib_tick < 100) return;
             calib_tick = HAL_GetTick();
             if (calib_angle > 70) calib_angle--;
@@ -808,25 +808,31 @@ static void State_CalibServo(void)
 
             if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT && calib_pressed == 0)
             {
-                calib_x_left  = calib_angle;
+                calib_save2   = calib_angle;
                 calib_pressed = 1;
                 Buzzer_Alert(1, 100, 0);
             }
-            if (calib_pressed == 1 && calib_angle <= 70)
+            if (calib_angle <= 70)
             {
-                CALIB_X_MIN = calib_x_right;
-                CALIB_X_MAX = calib_x_left;
+                if (calib_pressed == 0) calib_save2 = 110;
+                v = calib_save1; calib_save1 = (v < calib_save2) ? v : calib_save2;
+                v = calib_save2; calib_save2 = (v > calib_save1) ? v : calib_save1;
+                CALIB_X_MIN = calib_save1;
+                CALIB_X_MAX = calib_save2;
+
+                Servo_SetAngle(SERVO_AXIS_X, 90);
                 calib_phase   = 3;
                 calib_angle   = 80;
                 calib_pressed = 0;
+                calib_save1   = 0;
+                calib_save2   = 0;
                 Buzzer_Alert(2, 150, 100);
                 HAL_Delay(1500);
             }
             break;
-        }
 
-        case 3:  /* Y轴向上扫描 → 标记底边 */
-        {
+        /* ===== Y轴标定（80°→140°→80°）===== */
+        case 3:
             if (HAL_GetTick() - calib_tick < 100) return;
             calib_tick = HAL_GetTick();
             if (calib_angle < 140) calib_angle++;
@@ -834,21 +840,20 @@ static void State_CalibServo(void)
 
             if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT && calib_pressed == 0)
             {
-                calib_y_bottom = calib_angle;
+                calib_save1   = calib_angle;
                 calib_pressed = 1;
                 Buzzer_Alert(1, 100, 0);
             }
-            if (calib_pressed == 1 && calib_angle >= 140)
+            if (calib_angle >= 140)
             {
+                if (calib_pressed == 0) calib_save1 = 100;
                 calib_phase   = 4;
                 calib_angle   = 140;
                 calib_pressed = 0;
             }
             break;
-        }
 
-        case 4:  /* Y轴向下扫描 → 标记顶边 */
-        {
+        case 4:
             if (HAL_GetTick() - calib_tick < 100) return;
             calib_tick = HAL_GetTick();
             if (calib_angle > 80) calib_angle--;
@@ -856,19 +861,23 @@ static void State_CalibServo(void)
 
             if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT && calib_pressed == 0)
             {
-                calib_y_top = calib_angle;
+                calib_save2   = calib_angle;
                 calib_pressed = 1;
                 Buzzer_Alert(1, 100, 0);
             }
-            if (calib_pressed == 1 && calib_angle <= 80)
+            if (calib_angle <= 80)
             {
-                CALIB_Y_MIN = calib_y_bottom;
-                CALIB_Y_MAX = calib_y_top;
+                if (calib_pressed == 0) calib_save2 = 115;
+                v = calib_save1; calib_save1 = (v < calib_save2) ? v : calib_save2;
+                v = calib_save2; calib_save2 = (v > calib_save1) ? v : calib_save1;
+                CALIB_Y_MIN = calib_save1;
+                CALIB_Y_MAX = calib_save2;
+
                 calib_phase = 5;
             }
             break;
-        }
 
+        /* ===== 完成 ===== */
         case 5:
             Laser_Off();
             Servo_SetAngle(SERVO_AXIS_X, 90);
