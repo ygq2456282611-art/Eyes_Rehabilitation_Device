@@ -33,7 +33,7 @@
 4. 读取 BMI088 欧拉角，调用 `HeadTracker_Update()` 更新头部姿态分析。
 5. 根据姿态角判断是否进入报警状态，控制蜂鸣器和 WS2812。
 6. 扫描按键，调用 `App_Run()` 推进训练状态机。
-7. 每 20 ms 通过 UART1 输出一帧 VOFA 调试数据。
+7. 每 100 ms 通过 UART1 输出一帧 VOFA 短调试数据。
 
 ## 应用状态机
 
@@ -52,7 +52,8 @@ SYS_IDLE_VOICE -> SYS_CALIBRATE -> SYS_TRAIN -> SYS_FEEDBACK -> SYS_IDLE_VOICE
 
 特殊状态包括：
 
-- `SYS_PAUSE`：训练过程中检测到异常姿态后进入暂停。暂停时关闭激光，舵机回中，语音和蜂鸣器提示患者调整姿态。姿态连续正常 3 秒后自动恢复训练。
+- `SYS_CALIBRATE`：每次正式进入训练前都会先进入手动姿态校准。系统关闭刺激、舵机回中并播放校准等待提示；患者调整好坐姿和板子安装姿态后短按 PA2，程序调用 `BMI088_euler_init()` 和 `HeadTracker_Init()`，再进入当前训练模式。
+- `SYS_PAUSE`：训练过程中检测到异常姿态后进入暂停。暂停时关闭激光，舵机回中，语音和蜂鸣器提示患者调整姿态。姿态连续正常 3 秒后自动恢复训练，并补偿暂停期间的训练时间基准，避免继续后直接超时进入反馈。
 - `SYS_CALIB_SERVO`：语音命令“标定模式”触发，用 PA2 按键标记视野边界，更新训练用舵机角度范围。
 
 语音命令分为两类：
@@ -60,13 +61,20 @@ SYS_IDLE_VOICE -> SYS_CALIBRATE -> SYS_TRAIN -> SYS_FEEDBACK -> SYS_IDLE_VOICE
 - 命令词：在空闲状态选择训练模式或进入标定模式。
 - 唤醒词区命令：用于暂停、继续、重新开始、跳过当前训练，以及“你好小盈”统一中断当前训练回到空闲状态。
 
+控制词当前语义如下：
+
+- “重新开始”：在空闲、训练、暂停和反馈状态下都有效，使用当前 `train_mode` 进入 `SYS_CALIBRATE`，PA2 确认后从当前模式第 0 步重新开始。
+- “跳过这个”：在空闲、训练、暂停和反馈状态下都有效，先切换到下一个模式，再进入 `SYS_CALIBRATE`，PA2 确认后开始新模式。
+- “你好小盈”：只作为中断命令，停止当前刺激并回到 `SYS_IDLE_VOICE`，不再播放姿态暂停提示。
+- “暂停训练”：只在训练执行中进入 `SYS_PAUSE`；空闲或反馈状态下收到该命令会被记录为忽略事件。
+
 ## 五种训练模式
 
 | 模式 | 名称 | 主要逻辑 |
 | --- | --- | --- |
-| `MODE_A_FIXATION` | 注视稳定训练 | 激光固定点亮 15 秒，记录头部稳定性，根据稳定性给出语音反馈。 |
+| `MODE_A_FIXATION` | 注视稳定训练 | 激光固定点亮 15 秒，记录头部稳定性，根据稳定性给出语音反馈。该模式不因姿态异常进入全局暂停，只周期提醒患者保持头部稳定。 |
 | `MODE_B_SACCADE` | 扫视训练 | 激光在 4 个位置随机跳变 8 次，患者看到光点后按 PA2，记录正确次数和反应时间。 |
-| `MODE_C_PURSUIT` | 平稳追踪训练 | 激光按水平、斜线、圆形轨迹连续移动约 30 秒，提示患者用眼睛追踪。 |
+| `MODE_C_PURSUIT` | 平稳追踪训练 | 激光平滑移动到 8 个关键点，每到一个关键点等待 2 秒 PA2 确认，记录正确率、反应时间和头部代偿情况。 |
 | `MODE_D_FOCUS` | 视觉聚焦训练 | 近距 LED 与远距激光交替显示，每 5 秒切换一次，共 5 轮。 |
 | `MODE_E_NEGLECT` | 空间忽略训练 | 左右视野交替出现激光，患者按 PA2 确认发现光点，用于空间忽略训练。 |
 
@@ -89,6 +97,8 @@ SYS_IDLE_VOICE -> SYS_CALIBRATE -> SYS_TRAIN -> SYS_FEEDBACK -> SYS_IDLE_VOICE
 - `|yaw| > 30 deg` 触发报警。
 
 报警刚出现时蜂鸣器响两声；报警期间 WS2812 红色闪烁。正常状态下 WS2812 执行绿色呼吸灯效果。训练中发生姿态异常时进入 `SYS_PAUSE`，患者姿态恢复并稳定 3 秒后自动继续。
+
+进入 `SYS_TRAIN` 后前 500 ms 不执行姿态安全暂停检查，用于避开 PA2 手动校准刚完成时的瞬态姿态变化。`MODE_A_FIXATION` 注视稳定训练会绕开全局安全暂停，只在训练内根据头稳指标提醒和评价。
 
 ## 舵机视野标定
 
@@ -124,7 +134,26 @@ uint8_t CALIB_Y_MAX = 115;
 
 ## UART1 VOFA 调试输出
 
-主循环每 20 ms 通过 UART1 输出一行以 `imu:` 开头的调试数据，包含：
+主循环每 100 ms 通过 UART1 输出一行以 `imu:` 开头的短调试数据。USART1 当前保持 `115200, 8N1`，发送超时按本帧长度动态计算，并通过 `vofa_tx_fail_count` 记录发送失败次数。
+
+当前字段顺序如下：
+
+```text
+imu:
+euler_roll,euler_pitch,euler_yaw,
+std_roll,std_pitch,std_yaw,
+gyro_x,gyro_y,gyro_z,
+accel_x,accel_y,accel_z,
+bias_x,bias_y,bias_z,
+imu_is_static,imu_calibrated,temp,
+sbus_online,sbus_swa,sbus_swb,sbus_swb_middle,sbus_zero_event,
+AppState,AppMode,
+last_voice_cmd,last_cmd_tick,
+last_tx_type,last_tx_id,last_tx_tick,
+last_app_event,vofa_tx_fail_count
+```
+
+字段含义：
 
 - 应用层欧拉角：`euler_angle.roll/pitch/yaw`。
 - BMI088 内部姿态解算欧拉角：`vofa_roll_deg/pitch_deg/yaw_deg`。
@@ -132,9 +161,40 @@ uint8_t CALIB_Y_MAX = 115;
 - IMU 静止检测状态、校准状态。
 - SBUS 在线状态、SWA/SWB 通道值、SWB 是否处于中位、归零事件标志。
 - 当前应用状态 `App_GetState()` 和训练模式 `App_GetMode()`。
-- BMI088 中断、DMA、错误、pending 状态和采样时间戳。
+- 语音接收诊断：`last_voice_cmd` 和 `last_cmd_tick` 表示 MCU 最近一次收到的语音命令及其时间。
+- 语音发送诊断：`last_tx_type`、`last_tx_id` 和 `last_tx_tick` 表示 MCU 最近一次发给语音模块的播报帧。
+- 状态机诊断：`last_app_event` 表示最近一次应用层事件，`vofa_tx_fail_count=0` 表示 UART1 调试帧未发生发送失败。
 
-这些字段主要用于 VOFA 或串口助手观察姿态解算、SBUS 输入、DMA 收发和训练状态机是否正常。
+`last_app_event` 当前事件码：
+
+| 事件码 | 含义 |
+| --- | --- |
+| 0 | 无事件 |
+| 1 | 进入手动姿态校准 |
+| 2 | PA2 确认校准完成 |
+| 3 | 重新开始当前模式 |
+| 4 | 跳过当前模式 |
+| 5 | 进入暂停 |
+| 6 | 恢复训练 |
+| 7 | 进入反馈 |
+| 8 | 开始训练 |
+| 9 | 进入空闲 |
+| 10 | “你好小盈”中断 |
+| 11 | 命令收到但当前状态不处理 |
+
+这些字段主要用于 VOFA 或串口助手观察姿态解算、SBUS 输入、语音收发和训练状态机是否正常。若需要排查 BMI088 DMA/中断细节，可临时恢复 `BMI088_GetDebug()` 相关字段或单独增加低频 `dbg:` 行，避免默认 `imu:` 帧过长导致串口粘连。
+
+## 最近一次改动说明：训练状态机与语音诊断修复
+
+本轮修复主要围绕训练交互和现场调试：
+
+- 训练前姿态校准改为 PA2 手动确认，校准等待提示不再复用“训练暂停，请调整坐姿”。
+- “重新开始”和“跳过这个”扩展到空闲、训练、暂停和反馈状态；空闲状态下也会进入校准，而不是只记录命令。
+- “你好小盈”只作为中断回空闲，不再播放 `VOICE_TTS_POSTURE=0x17`。
+- 注视稳定训练不触发全局安全暂停，只提醒头部稳定并在结束时给稳定性反馈。
+- 平稳追踪训练改为 8 个关键点追踪，到点后等待 PA2 确认，记录正确率、反应时间和头动代偿。
+- 暂停恢复时补偿训练时间基准，并恢复暂停前舵机/激光状态，避免继续后立即进入反馈。
+- VOFA 默认输出改为 10Hz 短帧，保留核心 IMU、SBUS、App 状态和语音诊断字段，减少 USART1 115200 下的断帧和粘连。
 
 ## 最近一次改动说明：`68edf8a imu underlying update`
 
