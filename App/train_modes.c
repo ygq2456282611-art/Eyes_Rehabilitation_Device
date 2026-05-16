@@ -398,6 +398,7 @@ static void App_State_Pause(void)
     /* 检查姿态是否恢复 */
     HeadAnalysis_t *head = HeadTracker_GetResult();
     uint8_t alert = 0;
+    /* Vertical mount semantics: roll=nod, pitch=head turn, yaw=lateral tilt. */
     if (fabsf(head->roll)  > 20.0f) alert = 1;
     if (fabsf(head->pitch) > 20.0f) alert = 1;
     if (fabsf(head->yaw)   > 30.0f) alert = 1;
@@ -431,6 +432,7 @@ static void App_SafetyCheck(void)
 {
     HeadAnalysis_t *head = HeadTracker_GetResult();
     uint8_t alert = 0;
+    /* Vertical mount semantics: roll=nod, pitch=head turn, yaw=lateral tilt. */
     if (fabsf(head->roll)  > 20.0f) alert = 1;
     if (fabsf(head->pitch) > 20.0f) alert = 1;
     if (fabsf(head->yaw)   > 30.0f) alert = 1;

@@ -84,13 +84,13 @@ void HeadTracker_Update(bmi088_euler_data_t *euler, float dt)
     /* 3) 代偿性转头检测
      *    偏盲患者常用转头代替眼球扫视。用 roll 检测左右转头。
      *    若 |roll| > 20°，标记为代偿行为，训练模式据此提示 "用眼睛看" */
-    float abs_roll = fabsf(result.roll);
-    result.is_compensatory = (abs_roll > COMPENSATORY_ROLL_THRESHOLD) ? 1 : 0;
+    float abs_pitch = fabsf(result.pitch);
+    result.is_compensatory = (abs_pitch > COMPENSATORY_ROLL_THRESHOLD) ? 1 : 0;
 
     /* 4) 安全倾斜检测
      *    pitch 反映前后倾。若 |pitch| > 30° 说明患者前倾或后仰过度，
      *    可能影响训练效果或带来跌倒风险，触发暂停 */
-    result.safety_alert = (fabsf(result.pitch) > TILT_THRESHOLD) ? 1 : 0;
+    result.safety_alert = (fabsf(result.roll) > TILT_THRESHOLD) ? 1 : 0;
 
     /* 5) 循环缓存 + 头稳指标（标准差）
      *    将当前 pitch/roll 存入环形缓冲区，计算最近 N 帧的联合标准差。
@@ -146,16 +146,16 @@ void HeadTracker_Update(bmi088_euler_data_t *euler, float dt)
      *    - pitch 绝对值 > 20° 且比 roll 更突出 → 抬头(pitch>0)/低头(pitch<0)
      *    - roll 绝对值 > 15° 且比 pitch 更突出 → 右偏(roll>0)/左偏(roll<0)
      *    - 否则 → 正中 */
-    float abs_pitch = fabsf(result.pitch);
-    abs_roll = fabsf(result.roll);
+    abs_pitch = fabsf(result.pitch);
+    float abs_roll = fabsf(result.roll);
 
-    if (abs_pitch > 20.0f && abs_pitch > abs_roll)
+    if (abs_roll > 20.0f && abs_roll > abs_pitch)
     {
-        result.posture = (result.pitch > 0) ? POSTURE_UP : POSTURE_DOWN;
+        result.posture = (result.roll > 0) ? POSTURE_UP : POSTURE_DOWN;
     }
-    else if (abs_roll > 15.0f && abs_roll > abs_pitch)
+    else if (abs_pitch > 15.0f && abs_pitch > abs_roll)
     {
-        result.posture = (result.roll > 0) ? POSTURE_RIGHT : POSTURE_LEFT;
+        result.posture = (result.pitch > 0) ? POSTURE_RIGHT : POSTURE_LEFT;
     }
     else
     {

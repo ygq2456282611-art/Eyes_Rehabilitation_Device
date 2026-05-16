@@ -36,6 +36,8 @@
 #include "train_modes.h"
 #include "buzzer.h"
 #include "ws2812.h"
+#include "sbus.h"
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -69,6 +71,25 @@ void SystemClock_Config(void);
 /* USER CODE BEGIN 0 */
 bmi088_euler_data_t euler_angle;
 float temp;
+static float vofa_gyro[3];
+static float vofa_accel[3];
+static float vofa_bias[3];
+static float vofa_roll_deg;
+static float vofa_pitch_deg;
+static float vofa_yaw_deg;
+static float vofa_dt;
+static uint32_t vofa_timestamp_us;
+static uint8_t imu_calibrated;
+static uint8_t imu_is_static;
+static uint8_t sbus_online;
+static uint16_t sbus_swa;
+static uint16_t sbus_swb;
+static uint8_t sbus_swb_middle;
+static uint8_t sbus_zero_event;
+static uint8_t sbus_zero_event_report;
+static bmi088_debug_data_t bmi088_debug;
+static char vofa_buf[512];
+static uint32_t vofa_last_send_ms;
 static uint32_t ws2812_alert_tick = 0;
 static uint8_t  ws2812_alert_on = 0;
 static uint8_t  prev_alert_active = 0;
@@ -80,6 +101,7 @@ static uint8_t  prev_alert_active = 0;
   */
 int main(void)
 {
+
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
@@ -107,9 +129,13 @@ int main(void)
   MX_TIM1_Init();
   MX_USART1_UART_Init();
   MX_UART7_Init();
+  MX_UART5_Init();
   /* USER CODE BEGIN 2 */
     
-    BMI088_init();
+    while (BMI088_init() != BMI088_NO_ERROR)
+    {
+    }
+    BMI088_AsyncStart();
     BMI088_euler_init();
     HAL_Delay(2000);
 
@@ -136,6 +162,7 @@ int main(void)
     Buzzer_Init();
     WS2812_Init();
     Voice_Init();
+    SBUS_Init();
     
     Buzzer_Alert(3, 200, 100);
     Laser_Blink(200, 3);
@@ -168,12 +195,24 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+        SBUS_Update(HAL_GetTick());
+        BMI088_Task();
+        sbus_zero_event = SBUS_TakeSwbMiddleEvent();
+        if (sbus_zero_event != 0U)
+        {
+            sbus_zero_event_report = 1U;
+            BMI088_ResetReference();
+            HeadTracker_Init();
+        }
+
         BMI088_read_euler(&euler_angle, &temp);
         HeadTracker_Update(&euler_angle, 0.01f);
 
         HeadAnalysis_t *head = HeadTracker_GetResult();
+        (void)head;
 
         uint8_t alert_active = 0;
+        /* Vertical mount semantics: roll=nod, pitch=head turn, yaw=lateral tilt. */
         if (fabsf(euler_angle.roll)  > 20.0f) alert_active = 1;
         if (fabsf(euler_angle.pitch) > 20.0f) alert_active = 1;
         if (fabsf(euler_angle.yaw)   > 30.0f) alert_active = 1;
@@ -202,6 +241,64 @@ int main(void)
 
         Key_Scan();
         App_Run(&euler_angle, temp);
+
+        if ((HAL_GetTick() - vofa_last_send_ms) >= 20U)
+        {
+            int len;
+
+            vofa_last_send_ms = HAL_GetTick();
+            BMI088_GetLatestFloat(vofa_gyro, vofa_accel, &temp, &vofa_timestamp_us);
+            BMI088_GetEuler(&vofa_roll_deg, &vofa_pitch_deg, &vofa_yaw_deg, &vofa_dt, &vofa_timestamp_us);
+            BMI088_GetGyroBias(vofa_bias);
+            imu_calibrated = BMI088_IsCalibrated();
+            imu_is_static = BMI088_IsStatic();
+            sbus_online = SBUS_IsOnline();
+            sbus_swa = SBUS_GetChannel(SBUS_SWA_CH_INDEX);
+            sbus_swb = SBUS_GetChannel(SBUS_SWB_CH_INDEX);
+            sbus_swb_middle = SBUS_IsSwbMiddle();
+            BMI088_GetDebug(&bmi088_debug);
+
+            len = snprintf(vofa_buf, sizeof(vofa_buf),
+                           "imu:%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%u,%u,%.2f,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
+                           euler_angle.roll, euler_angle.pitch, euler_angle.yaw,
+                           vofa_roll_deg, vofa_pitch_deg, vofa_yaw_deg,
+                           vofa_gyro[0], vofa_gyro[1], vofa_gyro[2],
+                           vofa_accel[0], vofa_accel[1], vofa_accel[2],
+                           vofa_bias[0], vofa_bias[1], vofa_bias[2],
+                           (unsigned int)imu_is_static,
+                           (unsigned int)imu_calibrated,
+                           temp,
+                           (unsigned int)sbus_online,
+                           (unsigned int)sbus_swa,
+                           (unsigned int)sbus_swb,
+                           (unsigned int)sbus_swb_middle,
+                           (unsigned int)sbus_zero_event_report,
+                           (unsigned int)App_GetState(),
+                           (unsigned int)App_GetMode(),
+                           (unsigned int)bmi088_debug.acc_exti_count,
+                           (unsigned int)bmi088_debug.gyro_exti_count,
+                           (unsigned int)bmi088_debug.gyro_dma_count,
+                           (unsigned int)bmi088_debug.accel_dma_count,
+                           (unsigned int)bmi088_debug.temp_dma_count,
+                           (unsigned int)bmi088_debug.dma_error_count,
+                           (unsigned int)bmi088_debug.last_error,
+                           (unsigned int)bmi088_debug.spi_busy,
+                           (unsigned int)bmi088_debug.active_transaction,
+                           (unsigned int)bmi088_debug.gyro_pending,
+                           (unsigned int)bmi088_debug.accel_pending,
+                           (unsigned int)bmi088_debug.temp_pending,
+                           (unsigned int)bmi088_debug.gyro_timestamp_us,
+                           (unsigned int)bmi088_debug.accel_timestamp_us,
+                           (unsigned int)bmi088_debug.temp_timestamp_us);
+
+            if ((len > 0) && (len < (int)sizeof(vofa_buf)))
+            {
+                HAL_UART_Transmit(&huart1, (uint8_t *)vofa_buf, (uint16_t)len, 20);
+                sbus_zero_event_report = 0U;
+            }
+        }
+
+        BMI088_ClearNewSampleFlag();
         HAL_Delay(10);
   }
   /* USER CODE END 3 */
@@ -283,8 +380,7 @@ void Error_Handler(void)
   }
   /* USER CODE END Error_Handler_Debug */
 }
-
-#ifdef  USE_FULL_ASSERT
+#ifdef USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
   *         where the assert_param error has occurred.
