@@ -1,0 +1,60 @@
+% ============================================================
+%  main.tex  —  河南科技大学本科毕业设计(论文)
+%  基于 STM32H7 的脑卒中眼部康复头戴式装置设计与实现
+% ============================================================
+\documentclass{hustthesis}
+
+%% -------- 个人信息 --------
+\thesistitle{基于STM32H7的脑卒中眼部康复头戴式装置设计与实现}
+\thesisauthor{XXX}
+\thesisinstitute{莫动理工学院}
+\thesismajor{生物医学工程}
+\thesisadvisor{XXX}
+\thesisdate{2026年5月}
+
+%% -------- 参考文献 --------
+\usepackage[backend=biber, style=gb7714-2015, gbpub=false]{biblatex}
+\addbibresource{bib/ref.bib}
+
+%% ============================================================
+\begin{document}
+
+%% -------- 封面 --------
+\input{chapters/00_cover}
+
+%% -------- 声明页 --------
+\input{chapters/00_declaration}
+
+%% -------- 前置部分 (罗马页码) --------
+\frontmatter
+\pagestyle{fancy}
+
+%% 中英文摘要
+\input{chapters/00_abstract}
+
+%% 目录
+\tableofcontents
+\clearpage
+
+%% -------- 正文部分 (阿拉伯页码, 起始为1) --------
+\mainmatter
+\pagestyle{fancy}
+
+\input{chapters/01_intro}
+\input{chapters/02_system}
+\input{chapters/03_hardware}
+\input{chapters/04_software}
+\input{chapters/05_testing}
+\input{chapters/06_conclusion}
+
+%% -------- 参考文献 --------
+\printbibliography[heading=bibliography]
+
+%% -------- 附录 --------
+\appendix
+\input{chapters/appendix}
+
+%% -------- 致谢 --------
+\input{chapters/99_ack}
+
+\end{document}

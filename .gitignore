@@ -1,0 +1,27 @@
+# Build outputs
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.pdf
+*.run.xml
+*.synctex.gz
+*.toc
+*.xdv
+*.gz
+*_minted-*
+*_minted/
+
+# Error saves
+*.bcf-SAVE-ERROR
+
+# Backup files
+*.bak
+
+# OS
+Thumbs.db
+.DS_Store
