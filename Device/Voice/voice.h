@@ -71,6 +71,9 @@ void Voice_Play(uint8_t type, uint8_t id);
 void Voice_SendFrame(uint8_t type, uint8_t id);
 uint8_t Voice_GetCommand(void);
 UART_HandleTypeDef* Voice_GetUART(void);
+uint8_t Voice_GetLastTxType(void);
+uint8_t Voice_GetLastTxId(void);
+uint32_t Voice_GetLastTxTick(void);
 
 /* Voice_GetCommand() 的特殊返回值（唤醒词区命令） */
 #define VOICE_CMD_FROM_WAKE(t)  (0x80 | (t))

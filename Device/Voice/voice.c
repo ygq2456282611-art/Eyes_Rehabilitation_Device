@@ -14,6 +14,10 @@
 #include <string.h>
 #include <stdio.h>
 
+static uint8_t  last_tx_type  = 0;
+static uint8_t  last_tx_id    = 0;
+static uint32_t last_tx_tick  = 0;
+
 /* UART7 句柄指针，由 Voice_Init 赋值 */
 static UART_HandleTypeDef *huart = NULL;
 
@@ -124,7 +128,25 @@ void Voice_SendFrame(uint8_t type, uint8_t id)
  */
 void Voice_Play(uint8_t type, uint8_t id)
 {
+    last_tx_type = type;
+    last_tx_id = id;
+    last_tx_tick = HAL_GetTick();
     Voice_SendFrame(type, id);
+}
+
+uint8_t Voice_GetLastTxType(void)
+{
+    return last_tx_type;
+}
+
+uint8_t Voice_GetLastTxId(void)
+{
+    return last_tx_id;
+}
+
+uint32_t Voice_GetLastTxTick(void)
+{
+    return last_tx_tick;
 }
 
 /**

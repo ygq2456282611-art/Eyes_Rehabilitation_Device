@@ -21,6 +21,24 @@
 #include "buzzer.h"
 #include <string.h>
 
+#define APP_CALIB_CMD_GUARD_MS       1200U
+#define APP_TRAIN_SAFETY_GRACE_MS     500U
+
+typedef enum {
+    APP_EVENT_NONE = 0,
+    APP_EVENT_ENTER_CALIB = 1,
+    APP_EVENT_CALIB_CONFIRMED = 2,
+    APP_EVENT_RESTART = 3,
+    APP_EVENT_SKIP = 4,
+    APP_EVENT_ENTER_PAUSE = 5,
+    APP_EVENT_RESUME = 6,
+    APP_EVENT_ENTER_FEEDBACK = 7,
+    APP_EVENT_TRAIN_START = 8,
+    APP_EVENT_ENTER_IDLE = 9,
+    APP_EVENT_WAKE_HELLO = 10,
+    APP_EVENT_CMD_IGNORED = 11,
+} AppEvent_t;
+
 /* ===== 全局状态 ===== */
 static SystemState_t   sys_state   = SYS_IDLE_VOICE;
 static TrainMode_t     train_mode  = MODE_A_FIXATION;
@@ -39,7 +57,27 @@ static uint8_t  current_target      = 0;
 static uint32_t saccade_light_on_tick = 0;
 
 /* ===== 追踪训练变量 ===== */
-static uint8_t pursuit_phase = 0;
+typedef enum {
+    PURSUIT_MOVE = 0,
+    PURSUIT_CHECKPOINT = 1,
+} PursuitState_t;
+
+#define PURSUIT_POINT_COUNT       8U
+#define PURSUIT_MOVE_TIME_MS      2000U
+#define PURSUIT_CHECK_TIME_MS     2000U
+#define PURSUIT_COMP_LIMIT        20U
+
+static PursuitState_t pursuit_state = PURSUIT_MOVE;
+static uint8_t  pursuit_point_idx = 0;
+static uint32_t pursuit_state_tick = 0;
+static uint8_t  pursuit_start_x = 90;
+static uint8_t  pursuit_start_y = 90;
+static uint8_t  pursuit_target_x = 90;
+static uint8_t  pursuit_target_y = 90;
+static uint16_t pursuit_comp_count = 0;
+
+/* ===== 手动姿态校准变量 ===== */
+static uint8_t calib_prompted = 0;
 
 /* ===== 聚焦训练变量 ===== */
 static uint8_t  focus_phase      = 0;
@@ -54,6 +92,26 @@ static uint8_t  neglect_trial_count = 0;
 /* ===== 安全暂停/恢复变量 ===== */
 static uint32_t pause_stable_tick   = 0;
 static uint8_t  pause_voice_played  = 0;
+static uint32_t pause_enter_tick    = 0;
+static uint32_t paused_ms_last      = 0;
+static uint8_t  pause_resume_x      = 90;
+static uint8_t  pause_resume_y      = 90;
+static uint8_t  pause_resume_laser  = 0;
+static uint8_t  pause_resume_led    = 0;
+
+/* ===== 运行诊断变量 ===== */
+static uint8_t  last_voice_cmd      = 0;
+static uint32_t last_voice_cmd_tick = 0;
+static uint8_t  last_app_event      = APP_EVENT_NONE;
+static uint32_t last_mode_cmd_tick  = 0;
+static uint8_t  last_mode_cmd       = 0;
+static uint32_t train_entry_tick    = 0;
+
+/* ===== 应用层记录的舵机目标角度 ===== */
+static uint8_t  app_servo_x = 90;
+static uint8_t  app_servo_y = 90;
+static uint8_t  app_laser_on = 0;
+static uint8_t  app_led_focus_on = 0;
 
 /* 舵机角度标定参数（由 Calibrate_ServoRange 测量后填入） */
 /* X轴：第12步(80°)~第18步(110°)为训练范围 */
@@ -103,6 +161,28 @@ static void Train_Neglect(void);
 
 static void App_Transition(SystemState_t next_state);
 static void App_SafetyCheck(void);
+static void App_SetEvent(AppEvent_t event);
+static uint8_t App_ShouldIgnoreCalibCmd(uint8_t cmd);
+static void App_SetServoAngle(uint8_t axis, uint8_t angle);
+static void App_LaserOn(void);
+static void App_LaserOff(void);
+static void App_LEDFocusOn(void);
+static void App_LEDFocusOff(void);
+static void App_StopStimulus(void);
+static void App_EnterPause(uint8_t play_posture_voice);
+static void App_ResumeFromPause(void);
+static void App_ApplyPauseTime(uint32_t paused_ms);
+static void App_RestartCurrentMode(void);
+static void App_SkipToNextMode(void);
+static uint8_t App_IsPauseCmd(uint8_t cmd);
+static uint8_t App_IsResumeCmd(uint8_t cmd);
+static uint8_t App_IsRestartCmd(uint8_t cmd);
+static uint8_t App_IsSkipCmd(uint8_t cmd);
+static TrainMode_t App_NextMode(TrainMode_t mode);
+static void Pursuit_Reset(void);
+static void Pursuit_SetTarget(uint8_t idx);
+static void Pursuit_AdvancePoint(uint32_t now);
+static float SmoothStep(float x);
 static void State_CalibServo(void);
 void Calibrate_ServoRange(void);
 
@@ -116,6 +196,18 @@ void App_Init(void)
     memset(&record, 0, sizeof(TrainingRecord_t));
     timebase = HAL_GetTick();
     completed_modes = 0;
+    pause_enter_tick = 0;
+    paused_ms_last = 0;
+    last_voice_cmd = 0;
+    last_voice_cmd_tick = 0;
+    last_app_event = APP_EVENT_NONE;
+    last_mode_cmd_tick = 0;
+    last_mode_cmd = 0;
+    train_entry_tick = 0;
+    app_servo_x = 90;
+    app_servo_y = 90;
+    app_laser_on = 0;
+    app_led_focus_on = 0;
 }
 
 /**
@@ -128,6 +220,14 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
 
     /* 读取语音命令 */
     uint8_t cmd = Voice_GetCommand();
+    if (cmd != 0)
+    {
+        last_voice_cmd = cmd;
+        last_voice_cmd_tick = HAL_GetTick();
+    }
+
+    if ((sys_state == SYS_CALIBRATE) && App_ShouldIgnoreCalibCmd(cmd))
+        cmd = 0;
 
     /* ===== 全局命令处理（唤醒词区 TYPE=0x01~0x0F）===== */
     if (VOICE_CMD_IS_WAKE(cmd))
@@ -137,26 +237,22 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
         {
             if (sys_state == SYS_TRAIN || sys_state == SYS_PAUSE)
             {
-                Laser_Off();
-                Servo_SetAngle(SERVO_AXIS_X, 90);
-                Servo_SetAngle(SERVO_AXIS_Y, 90);
-                Voice_Play(0xFF, VOICE_TTS_POSTURE);
+                App_StopStimulus();
             }
-            sys_state = SYS_IDLE_VOICE;
             pause_voice_played = 0;
             pause_stable_tick = 0;
+            pause_enter_tick = 0;
+            App_Transition(SYS_IDLE_VOICE);
+            App_SetEvent(APP_EVENT_WAKE_HELLO);
             return;
         }
 
         /* "继续训练" — 从 IDLE_VOICE 恢复之前的训练 */
-        if (cmd == VOICE_CMD_WAKE_RESUME)
+        if (App_IsResumeCmd(cmd))
         {
             if (sys_state == SYS_PAUSE)
             {
-                Voice_Play(0xFF, VOICE_TTS_CONTINUE);
-                pause_voice_played  = 0;
-                pause_stable_tick   = 0;
-                sys_state = SYS_TRAIN;
+                App_ResumeFromPause();
                 return;
             }
             if (sys_state == SYS_IDLE_VOICE)
@@ -169,42 +265,48 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
         /* 其他唤醒词命令按状态处理 */
         switch (sys_state)
         {
+            case SYS_IDLE_VOICE:
+            case SYS_FEEDBACK:
             case SYS_TRAIN:
-                if (cmd == VOICE_CMD_WAKE_PAUSE)
+                if (App_IsPauseCmd(cmd))
                 {
-                    Voice_Play(0xFF, VOICE_TTS_POSTURE);
-                    Buzzer_Alert(2, 150, 100);
-                    Laser_Off();
-                    Servo_SetAngle(SERVO_AXIS_X, 90);
-                    Servo_SetAngle(SERVO_AXIS_Y, 90);
-                    sys_state = SYS_PAUSE;
+                    if (sys_state == SYS_TRAIN)
+                    {
+                        App_EnterPause(1);
+                    }
+                    else
+                    {
+                        App_SetEvent(APP_EVENT_CMD_IGNORED);
+                    }
                     return;
                 }
-                if (cmd == VOICE_CMD_WAKE_RESTART)
+                if (App_IsRestartCmd(cmd))
                 {
-                    App_Transition(SYS_CALIBRATE);
+                    App_RestartCurrentMode();
                     return;
                 }
-                if (cmd == VOICE_CMD_WAKE_SKIP)
+                if (App_IsSkipCmd(cmd))
                 {
-                    record.end_tick = HAL_GetTick();
-                    record.completed = 1;
-                    App_Transition(SYS_FEEDBACK);
+                    App_SkipToNextMode();
                     return;
                 }
                 break;
 
             case SYS_PAUSE:
-                if (cmd == VOICE_CMD_WAKE_SKIP)
+                if (App_IsRestartCmd(cmd))
                 {
-                    record.end_tick = HAL_GetTick();
-                    record.completed = 1;
-                    App_Transition(SYS_FEEDBACK);
+                    App_RestartCurrentMode();
+                    return;
+                }
+                if (App_IsSkipCmd(cmd))
+                {
+                    App_SkipToNextMode();
                     return;
                 }
                 break;
 
             default:
+                App_SetEvent(APP_EVENT_CMD_IGNORED);
                 break;
         }
     }
@@ -212,6 +314,31 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
     /* ===== 命令词处理（TYPE=0x00，仅在 IDLE_VOICE 中有效）===== */
     if (cmd > 0 && !VOICE_CMD_IS_WAKE(cmd))
     {
+        if ((sys_state == SYS_IDLE_VOICE || sys_state == SYS_TRAIN ||
+             sys_state == SYS_PAUSE || sys_state == SYS_FEEDBACK) &&
+            App_IsRestartCmd(cmd))
+        {
+            App_RestartCurrentMode();
+            return;
+        }
+        if (sys_state == SYS_TRAIN && App_IsPauseCmd(cmd))
+        {
+            App_EnterPause(1);
+            return;
+        }
+        if (sys_state == SYS_PAUSE && App_IsResumeCmd(cmd))
+        {
+            App_ResumeFromPause();
+            return;
+        }
+        if ((sys_state == SYS_IDLE_VOICE || sys_state == SYS_TRAIN ||
+             sys_state == SYS_PAUSE || sys_state == SYS_FEEDBACK) &&
+            App_IsSkipCmd(cmd))
+        {
+            App_SkipToNextMode();
+            return;
+        }
+
         if (sys_state == SYS_IDLE_VOICE)
         {
             if (cmd >= VOICE_CMD_CALIB_MODE && cmd <= VOICE_CMD_CALIB_MODE)
@@ -229,6 +356,11 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
                 return;
             }
         }
+
+        if (cmd != 0)
+        {
+            App_SetEvent(APP_EVENT_CMD_IGNORED);
+        }
     }
 
     /* ===== 状态机分发 ===== */
@@ -236,7 +368,12 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
     {
         case SYS_IDLE_VOICE: break;
         case SYS_CALIBRATE:  App_State_Calibrate(); break;
-        case SYS_TRAIN:      App_SafetyCheck(); App_State_Train(); break;
+        case SYS_TRAIN:
+            if (train_mode != MODE_A_FIXATION)
+                App_SafetyCheck();
+            if (sys_state == SYS_TRAIN)
+                App_State_Train();
+            break;
         case SYS_FEEDBACK:   App_State_Feedback();  break;
         case SYS_PAUSE:      App_State_Pause();     break;
         case SYS_CALIB_SERVO: State_CalibServo();   break;
@@ -247,6 +384,11 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
 SystemState_t App_GetState(void) { return sys_state; }
 TrainMode_t   App_GetMode(void)  { return train_mode; }
 TrainingRecord_t App_GetRecord(void) { return record; }
+uint8_t App_GetLastVoiceCmd(void) { return last_voice_cmd; }
+uint32_t App_GetLastVoiceCmdTick(void) { return last_voice_cmd_tick; }
+uint32_t App_GetPauseEnterTick(void) { return pause_enter_tick; }
+uint32_t App_GetLastPausedMs(void) { return paused_ms_last; }
+uint8_t App_GetLastEvent(void) { return last_app_event; }
 
 /**
  * @brief  IDLE_VOICE — 语音命令在 App_Run 中全局处理
@@ -282,14 +424,26 @@ static void App_State_IdleVoice(void)
  */
 static void App_State_Calibrate(void)
 {
-    Voice_Play(0x00, VOICE_CMD_CALIB_STILL);
-    voice_cooldown = HAL_GetTick();
-    HAL_Delay(3500);
-    BMI088_euler_init();
-    Voice_Play(0xFF, VOICE_TTS_CALIB_DONE);
-    voice_cooldown = HAL_GetTick();
-    HAL_Delay(2500);
-    App_Transition(SYS_TRAIN);
+    if (!calib_prompted)
+    {
+        App_StopStimulus();
+        (void)Key_GetEvent(KEY_PATIENT);
+        Voice_Play(0xFF, VOICE_TTS_KEEP_STILL);
+        voice_cooldown = HAL_GetTick();
+        calib_prompted = 1;
+        return;
+    }
+
+    if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT)
+    {
+        BMI088_euler_init();
+        HeadTracker_Init();
+        App_SetEvent(APP_EVENT_CALIB_CONFIRMED);
+        Voice_Play(0xFF, VOICE_TTS_CALIB_DONE);
+        voice_cooldown = HAL_GetTick();
+        calib_prompted = 0;
+        App_Transition(SYS_TRAIN);
+    }
 }
 
 /**
@@ -317,7 +471,8 @@ static void App_State_Feedback(void)
     uint16_t correct = record.correct_trials;
     (void)total; (void)correct;
 
-    completed_modes++;
+    if (record.completed)
+        completed_modes++;
 
     switch (train_mode)
     {
@@ -353,12 +508,18 @@ static void App_State_Feedback(void)
         }
 
         case MODE_C_PURSUIT:
-            if (pursuit_phase > 6)
+        {
+            if (total == 0) total = 1;
+            uint8_t rate = correct * 100 / total;
+            if (rate < 50)
+                Voice_Play(0xFF, VOICE_TTS_RESULT_TRY);
+            else if (pursuit_comp_count > PURSUIT_COMP_LIMIT)
                 Voice_Play(0xFF, VOICE_TTS_PUR_HEAD);
             else
                 Voice_Play(0xFF, VOICE_TTS_PUR_GOOD);
             HAL_Delay(8000);
             break;
+        }
 
         default:
             Voice_Play(0xFF, VOICE_TTS_TRAIN_DONE);
@@ -388,9 +549,6 @@ static void App_State_Pause(void)
         Voice_Play(0xFF, VOICE_TTS_KEEP_STILL);
         voice_cooldown = HAL_GetTick();
         Buzzer_Alert(2, 150, 100);
-        Laser_Off();
-        Servo_SetAngle(SERVO_AXIS_X, 90);
-        Servo_SetAngle(SERVO_AXIS_Y, 90);
         pause_voice_played = 1;
         return;
     }
@@ -410,13 +568,7 @@ static void App_State_Pause(void)
 
         if (now - pause_stable_tick >= 3000)
         {
-            Voice_Play(0xFF, VOICE_TTS_CONTINUE);
-            voice_cooldown = HAL_GetTick();
-            HAL_Delay(2000);
-            Laser_On();
-            pause_voice_played  = 0;
-            pause_stable_tick   = 0;
-            sys_state = SYS_TRAIN;
+            App_ResumeFromPause();
         }
     }
     else
@@ -430,6 +582,9 @@ static void App_State_Pause(void)
  */
 static void App_SafetyCheck(void)
 {
+    if ((HAL_GetTick() - train_entry_tick) < APP_TRAIN_SAFETY_GRACE_MS)
+        return;
+
     HeadAnalysis_t *head = HeadTracker_GetResult();
     uint8_t alert = 0;
     /* Vertical mount semantics: roll=nod, pitch=head turn, yaw=lateral tilt. */
@@ -439,10 +594,264 @@ static void App_SafetyCheck(void)
 
     if (alert)
     {
-        sys_state = SYS_PAUSE;
-        pause_stable_tick = 0;
-        pause_voice_played = 0;
+        App_EnterPause(0);
     }
+}
+
+static void App_SetServoAngle(uint8_t axis, uint8_t angle)
+{
+    if (angle > 180) angle = 180;
+    Servo_SetAngle(axis, angle);
+    if (axis == SERVO_AXIS_X)
+        app_servo_x = angle;
+    else if (axis == SERVO_AXIS_Y)
+        app_servo_y = angle;
+}
+
+static void App_SetEvent(AppEvent_t event)
+{
+    last_app_event = (uint8_t)event;
+}
+
+static uint8_t App_ShouldIgnoreCalibCmd(uint8_t cmd)
+{
+    if (cmd == 0)
+        return 0;
+
+    if (!App_IsRestartCmd(cmd) && !App_IsSkipCmd(cmd))
+        return 0;
+
+    if (cmd != last_mode_cmd)
+        return 0;
+
+    return (uint8_t)((HAL_GetTick() - last_mode_cmd_tick) < APP_CALIB_CMD_GUARD_MS);
+}
+
+static void App_LaserOn(void)
+{
+    Laser_On();
+    app_laser_on = 1;
+}
+
+static void App_LaserOff(void)
+{
+    Laser_Off();
+    app_laser_on = 0;
+}
+
+static void App_LEDFocusOn(void)
+{
+    LED_On(LED_FOCUS);
+    app_led_focus_on = 1;
+}
+
+static void App_LEDFocusOff(void)
+{
+    LED_Off(LED_FOCUS);
+    app_led_focus_on = 0;
+}
+
+static void App_StopStimulus(void)
+{
+    App_LaserOff();
+    App_LEDFocusOff();
+    App_SetServoAngle(SERVO_AXIS_X, 90);
+    App_SetServoAngle(SERVO_AXIS_Y, 90);
+}
+
+static void App_EnterPause(uint8_t play_posture_voice)
+{
+    if (sys_state == SYS_PAUSE)
+        return;
+
+    App_SetEvent(APP_EVENT_ENTER_PAUSE);
+    pause_resume_x = app_servo_x;
+    pause_resume_y = app_servo_y;
+    pause_resume_laser = app_laser_on;
+    pause_resume_led = app_led_focus_on;
+    pause_enter_tick = HAL_GetTick();
+    pause_stable_tick = 0;
+    pause_voice_played = 0;
+
+    if (play_posture_voice)
+    {
+        Voice_Play(0xFF, VOICE_TTS_POSTURE);
+        voice_cooldown = HAL_GetTick();
+        Buzzer_Alert(2, 150, 100);
+        pause_voice_played = 1;
+    }
+
+    App_LaserOff();
+    App_LEDFocusOff();
+    App_SetServoAngle(SERVO_AXIS_X, 90);
+    App_SetServoAngle(SERVO_AXIS_Y, 90);
+    sys_state = SYS_PAUSE;
+}
+
+static void App_ResumeFromPause(void)
+{
+    uint32_t now = HAL_GetTick();
+    uint32_t paused_ms = 0;
+
+    if (pause_enter_tick != 0)
+        paused_ms = now - pause_enter_tick;
+
+    paused_ms_last = paused_ms;
+    App_ApplyPauseTime(paused_ms);
+    App_SetEvent(APP_EVENT_RESUME);
+
+    Voice_Play(0xFF, VOICE_TTS_CONTINUE);
+    voice_cooldown = HAL_GetTick();
+    App_SetServoAngle(SERVO_AXIS_X, pause_resume_x);
+    App_SetServoAngle(SERVO_AXIS_Y, pause_resume_y);
+    if (pause_resume_laser)
+        App_LaserOn();
+    else
+        App_LaserOff();
+    if (pause_resume_led)
+        App_LEDFocusOn();
+    else
+        App_LEDFocusOff();
+
+    pause_voice_played = 0;
+    pause_stable_tick = 0;
+    pause_enter_tick = 0;
+    sys_state = SYS_TRAIN;
+}
+
+static void App_ApplyPauseTime(uint32_t paused_ms)
+{
+    if (paused_ms == 0)
+        return;
+
+    timebase += paused_ms;
+    record.start_tick += paused_ms;
+
+    if (trial_start_tick != 0)
+        trial_start_tick += paused_ms;
+    if (saccade_light_on_tick != 0)
+        saccade_light_on_tick += paused_ms;
+    if (pursuit_state_tick != 0)
+        pursuit_state_tick += paused_ms;
+    if (focus_phase_tick != 0)
+        focus_phase_tick += paused_ms;
+    if (neglect_trial_tick != 0)
+        neglect_trial_tick += paused_ms;
+}
+
+static void App_RestartCurrentMode(void)
+{
+    last_mode_cmd = last_voice_cmd;
+    last_mode_cmd_tick = HAL_GetTick();
+    App_StopStimulus();
+    record.completed = 0;
+    record.end_tick = HAL_GetTick();
+    pause_stable_tick = 0;
+    pause_voice_played = 0;
+    pause_enter_tick = 0;
+    App_Transition(SYS_CALIBRATE);
+    App_SetEvent(APP_EVENT_RESTART);
+}
+
+static TrainMode_t App_NextMode(TrainMode_t mode)
+{
+    uint8_t next = (uint8_t)mode + 1U;
+    if (next >= MODE_COUNT)
+        next = MODE_A_FIXATION;
+    return (TrainMode_t)next;
+}
+
+static void App_SkipToNextMode(void)
+{
+    last_mode_cmd = last_voice_cmd;
+    last_mode_cmd_tick = HAL_GetTick();
+    App_StopStimulus();
+    record.completed = 0;
+    record.end_tick = HAL_GetTick();
+    Voice_Play(0xFF, VOICE_TTS_NEXT_PREP);
+    voice_cooldown = HAL_GetTick();
+    train_mode = App_NextMode(train_mode);
+    pause_stable_tick = 0;
+    pause_voice_played = 0;
+    pause_enter_tick = 0;
+    App_Transition(SYS_CALIBRATE);
+    App_SetEvent(APP_EVENT_SKIP);
+}
+
+static uint8_t App_IsPauseCmd(uint8_t cmd)
+{
+    return (cmd == VOICE_CMD_WAKE_PAUSE || cmd == VOICE_CMD_PAUSE);
+}
+
+static uint8_t App_IsResumeCmd(uint8_t cmd)
+{
+    return (cmd == VOICE_CMD_WAKE_RESUME || cmd == VOICE_CMD_RESUME);
+}
+
+static uint8_t App_IsRestartCmd(uint8_t cmd)
+{
+    return (cmd == VOICE_CMD_WAKE_RESTART || cmd == VOICE_CMD_RESTART);
+}
+
+static uint8_t App_IsSkipCmd(uint8_t cmd)
+{
+    return (cmd == VOICE_CMD_WAKE_SKIP || cmd == VOICE_CMD_SKIP);
+}
+
+static float SmoothStep(float x)
+{
+    if (x < 0.0f) x = 0.0f;
+    if (x > 1.0f) x = 1.0f;
+    return x * x * (3.0f - 2.0f * x);
+}
+
+static void Pursuit_SetTarget(uint8_t idx)
+{
+    uint8_t x_mid = (uint8_t)(((uint16_t)CALIB_X_MIN + (uint16_t)CALIB_X_MAX) / 2U);
+    uint8_t y_mid = (uint8_t)(((uint16_t)CALIB_Y_MIN + (uint16_t)CALIB_Y_MAX) / 2U);
+
+    switch (idx)
+    {
+        case 0: pursuit_target_x = CALIB_X_MIN; pursuit_target_y = y_mid; break;
+        case 1: pursuit_target_x = CALIB_X_MAX; pursuit_target_y = y_mid; break;
+        case 2: pursuit_target_x = x_mid;       pursuit_target_y = CALIB_Y_MAX; break;
+        case 3: pursuit_target_x = x_mid;       pursuit_target_y = CALIB_Y_MIN; break;
+        case 4: pursuit_target_x = CALIB_X_MIN; pursuit_target_y = CALIB_Y_MAX; break;
+        case 5: pursuit_target_x = CALIB_X_MAX; pursuit_target_y = CALIB_Y_MIN; break;
+        case 6: pursuit_target_x = CALIB_X_MAX; pursuit_target_y = CALIB_Y_MAX; break;
+        case 7: pursuit_target_x = CALIB_X_MIN; pursuit_target_y = CALIB_Y_MIN; break;
+        default: pursuit_target_x = x_mid;      pursuit_target_y = y_mid; break;
+    }
+}
+
+static void Pursuit_Reset(void)
+{
+    pursuit_state = PURSUIT_MOVE;
+    pursuit_point_idx = 0;
+    pursuit_state_tick = HAL_GetTick();
+    pursuit_start_x = 90;
+    pursuit_start_y = 90;
+    pursuit_comp_count = 0;
+    Pursuit_SetTarget(0);
+}
+
+static void Pursuit_AdvancePoint(uint32_t now)
+{
+    pursuit_point_idx++;
+    if (pursuit_point_idx >= PURSUIT_POINT_COUNT)
+    {
+        App_StopStimulus();
+        record.end_tick = now;
+        record.completed = 1;
+        App_Transition(SYS_FEEDBACK);
+        return;
+    }
+
+    pursuit_start_x = pursuit_target_x;
+    pursuit_start_y = pursuit_target_y;
+    Pursuit_SetTarget(pursuit_point_idx);
+    pursuit_state = PURSUIT_MOVE;
+    pursuit_state_tick = now;
 }
 
 /**
@@ -452,13 +861,23 @@ static void App_Transition(SystemState_t next_state)
 {
     sys_state = next_state;
 
+    if (next_state == SYS_CALIBRATE)
+    {
+        App_SetEvent(APP_EVENT_ENTER_CALIB);
+        calib_prompted = 0;
+        pause_stable_tick = 0;
+        pause_voice_played = 0;
+    }
+
     if (next_state == SYS_TRAIN)
     {
+        App_SetEvent(APP_EVENT_TRAIN_START);
         memset(&record, 0, sizeof(TrainingRecord_t));
         record.mode = train_mode;
         record.start_tick = HAL_GetTick();
         timebase = HAL_GetTick();
-        pursuit_phase = 0;
+        train_entry_tick = record.start_tick;
+        Pursuit_Reset();
         focus_phase = 0;
         saccade_idx = 0;
         saccade_count = 0;
@@ -469,10 +888,17 @@ static void App_Transition(SystemState_t next_state)
         voice_cooldown = 0;
 
         /* 模式播报由模块自动响应语音命令词完成，MCU 只需等待即可 */
-        HAL_Delay(1200);
         saccade_light_on_tick = 0;
-        saccade_idx++;
-        HAL_Delay(500);
+    }
+
+    if (next_state == SYS_FEEDBACK)
+    {
+        App_SetEvent(APP_EVENT_ENTER_FEEDBACK);
+    }
+
+    if (next_state == SYS_IDLE_VOICE)
+    {
+        App_SetEvent(APP_EVENT_ENTER_IDLE);
     }
 }
 
@@ -485,8 +911,8 @@ static void Train_Fixation(void)
     uint32_t now = HAL_GetTick();
     uint32_t elapsed = now - timebase;
 
-    Laser_On();
-    LED_On(LED_FOCUS);
+    App_LaserOn();
+    App_LEDFocusOn();
 
     HeadAnalysis_t *head = HeadTracker_GetResult();
     if (head->head_stability > 5.0f)
@@ -501,8 +927,8 @@ static void Train_Fixation(void)
 
     if (elapsed > 15000)
     {
-        Laser_Off();
-        LED_Off(LED_FOCUS);
+        App_LaserOff();
+        App_LEDFocusOff();
         record.end_tick = now;
         record.avg_head_stability = head->head_stability;
         record.completed = 1;
@@ -554,10 +980,10 @@ static void Train_Saccade(void)
             case 3: x_angle = CALIB_X_MAX; y_angle = CALIB_Y_MAX; break;
         }
 
-        Servo_SetAngle(SERVO_AXIS_X, x_angle);
-        Servo_SetAngle(SERVO_AXIS_Y, y_angle);
+        App_SetServoAngle(SERVO_AXIS_X, x_angle);
+        App_SetServoAngle(SERVO_AXIS_Y, y_angle);
         HAL_Delay(100);
-        Laser_On();
+        App_LaserOn();
         saccade_light_on_tick = now;
         trial_start_tick = now;
         trial_result = 0;
@@ -570,7 +996,7 @@ static void Train_Saccade(void)
         trial_result = 1;
         record.correct_trials++;
         record.avg_reaction_ms += (float)(now - trial_start_tick);
-        Laser_Off();
+        App_LaserOff();
         saccade_streak++;
         if (saccade_streak >= 3)
         {
@@ -592,7 +1018,7 @@ static void Train_Saccade(void)
     if (now - saccade_light_on_tick > 3000 && trial_result == 0)
     {
         saccade_streak = 0;
-        Laser_Off();
+        App_LaserOff();
         Voice_Play(0xFF, VOICE_TTS_TIMEOUT);
         voice_cooldown = HAL_GetTick();
         HAL_Delay(1000);
@@ -604,62 +1030,63 @@ static void Train_Saccade(void)
 
 /**
  * @brief  C — 平稳追踪训练
- *         激光连续移动（水平→斜线→圆）× 30 秒
+ *         激光平滑移动到关键点，到点后等待 PA2 确认
  */
 static void Train_Pursuit(void)
 {
     uint32_t now = HAL_GetTick();
-    float t = (float)(now - timebase) / 5000.0f;
+    uint32_t elapsed = now - pursuit_state_tick;
 
-    Laser_On();
-
-    uint8_t x_mid   = (CALIB_X_MIN + CALIB_X_MAX) / 2;
-    uint8_t x_amp   = (CALIB_X_MAX - CALIB_X_MIN) / 2;
-    uint8_t y_mid   = (CALIB_Y_MIN + CALIB_Y_MAX) / 2;
-    uint8_t y_amp   = (CALIB_Y_MAX - CALIB_Y_MIN) / 2;
-    uint8_t x_angle, y_angle;
-
-    switch (pursuit_phase % 3)
-    {
-        case 0: x_angle = (uint8_t)(x_mid + x_amp * t); y_angle = y_mid;
-            if (t >= 1.0f) { pursuit_phase++; timebase = now; } break;
-        case 1:
-            x_angle = (uint8_t)((CALIB_X_MAX)*(1-t) + CALIB_X_MIN*t);
-            y_angle = (uint8_t)((CALIB_Y_MIN)*(1-t) + CALIB_Y_MAX*t);
-            if (t >= 1.0f) { pursuit_phase++; timebase = now; } break;
-        case 2:
-        { float rad = t * 6.2832f;
-          x_angle = (uint8_t)(x_mid + x_amp*cosf(rad));
-          y_angle = (uint8_t)(y_mid + y_amp*sinf(rad));
-          if (t >= 1.0f) { pursuit_phase++; timebase = now; } break;
-        }
-    }
-
-    if (x_angle > 180) x_angle = 180;
-    if (y_angle > 180) y_angle = 180;
-
-    Servo_SetAngle(SERVO_AXIS_X, x_angle);
-    Servo_SetAngle(SERVO_AXIS_Y, y_angle);
+    App_LaserOn();
 
     HeadAnalysis_t *head = HeadTracker_GetResult();
     if (head->is_compensatory)
+        pursuit_comp_count++;
+
+    if (pursuit_state == PURSUIT_MOVE)
     {
-        if (HAL_GetTick() - voice_cooldown > 3000)
+        float s = (float)elapsed / (float)PURSUIT_MOVE_TIME_MS;
+        if (s > 1.0f) s = 1.0f;
+        s = SmoothStep(s);
+
+        uint8_t x_angle = (uint8_t)((float)pursuit_start_x +
+                           ((float)pursuit_target_x - (float)pursuit_start_x) * s);
+        uint8_t y_angle = (uint8_t)((float)pursuit_start_y +
+                           ((float)pursuit_target_y - (float)pursuit_start_y) * s);
+        App_SetServoAngle(SERVO_AXIS_X, x_angle);
+        App_SetServoAngle(SERVO_AXIS_Y, y_angle);
+
+        if (elapsed >= PURSUIT_MOVE_TIME_MS)
         {
-            Voice_Play(0xFF, VOICE_TTS_EYE_ONLY);
+            App_SetServoAngle(SERVO_AXIS_X, pursuit_target_x);
+            App_SetServoAngle(SERVO_AXIS_Y, pursuit_target_y);
+            pursuit_state = PURSUIT_CHECKPOINT;
+            pursuit_state_tick = now;
+            trial_start_tick = now;
+            trial_result = 0;
+            record.total_trials++;
+            Voice_Play(0xFF, VOICE_TTS_FIND_LIGHT);
             voice_cooldown = HAL_GetTick();
-            HAL_Delay(500);
         }
+        return;
     }
 
-    if (now - record.start_tick > 30000)
+    if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT && trial_result == 0)
     {
-        Laser_Off();
-        Servo_SetAngle(SERVO_AXIS_X, 90);
-        Servo_SetAngle(SERVO_AXIS_Y, 90);
-        record.end_tick = now;
-        record.completed = 1;
-        App_Transition(SYS_FEEDBACK);
+        trial_result = 1;
+        record.correct_trials++;
+        record.avg_reaction_ms += (float)(now - trial_start_tick);
+        Voice_Play(0xFF, VOICE_TTS_CORRECT);
+        voice_cooldown = HAL_GetTick();
+        Pursuit_AdvancePoint(now);
+        return;
+    }
+
+    if (elapsed >= PURSUIT_CHECK_TIME_MS && trial_result == 0)
+    {
+        Voice_Play(0xFF, VOICE_TTS_TIMEOUT);
+        voice_cooldown = HAL_GetTick();
+        Pursuit_AdvancePoint(now);
     }
 }
 
@@ -675,15 +1102,15 @@ static void Train_Focus(void)
 
     if (focus_phase < 10)
     {
-        if ((focus_phase & 1) == 0) { LED_On(LED_FOCUS); Laser_Off(); }
-        else                        { LED_Off(LED_FOCUS); Laser_On(); }
+        if ((focus_phase & 1) == 0) { App_LEDFocusOn(); App_LaserOff(); }
+        else                        { App_LEDFocusOff(); App_LaserOn(); }
 
         if (elapsed > 5000) { focus_phase++; focus_phase_tick = now; }
     }
     else
     {
-        LED_Off(LED_FOCUS);
-        Laser_Off();
+        App_LEDFocusOff();
+        App_LaserOff();
         record.end_tick = now;
         record.completed = 1;
         App_Transition(SYS_FEEDBACK);
@@ -702,9 +1129,9 @@ static void Train_Neglect(void)
     {
         neglect_side = neglect_trial_count & 1;
 
-        Servo_SetAngle(SERVO_AXIS_X, neglect_side ? CALIB_X_MAX : CALIB_X_MIN);
+        App_SetServoAngle(SERVO_AXIS_X, neglect_side ? CALIB_X_MAX : CALIB_X_MIN);
         HAL_Delay(300);
-        Laser_On();
+        App_LaserOn();
         Voice_Play(0xFF, neglect_side ? VOICE_TTS_RIGHT_SIDE : VOICE_TTS_LEFT_SIDE);
         voice_cooldown = HAL_GetTick();
         HAL_Delay(2000);
@@ -722,8 +1149,8 @@ static void Train_Neglect(void)
         neglect_responded = 1;
         record.correct_trials++;
         record.avg_reaction_ms += (float)reaction;
-        Laser_Off();
-        Servo_SetAngle(SERVO_AXIS_X, 90);
+        App_LaserOff();
+        App_SetServoAngle(SERVO_AXIS_X, 90);
         Voice_Play(0xFF, VOICE_TTS_FOUND_SIDE);
         voice_cooldown = HAL_GetTick();
         neglect_trial_tick = 0;
@@ -735,8 +1162,8 @@ static void Train_Neglect(void)
     {
         Voice_Play(0xFF, VOICE_TTS_NEGLECT_HINT);
         voice_cooldown = HAL_GetTick();
-        Laser_Off();
-        Servo_SetAngle(SERVO_AXIS_X, 90);
+        App_LaserOff();
+        App_SetServoAngle(SERVO_AXIS_X, 90);
         neglect_trial_tick = 0;
         HAL_Delay(1000);
         return;

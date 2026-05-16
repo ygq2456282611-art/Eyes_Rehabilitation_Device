@@ -47,6 +47,11 @@ void App_Run(bmi088_euler_data_t *euler, float temp);
 SystemState_t App_GetState(void);
 TrainMode_t App_GetMode(void);
 TrainingRecord_t App_GetRecord(void);
+uint8_t App_GetLastVoiceCmd(void);
+uint32_t App_GetLastVoiceCmdTick(void);
+uint32_t App_GetPauseEnterTick(void);
+uint32_t App_GetLastPausedMs(void);
+uint8_t App_GetLastEvent(void);
 void Calibrate_ServoRange(void);
 
 #endif
