@@ -11,8 +11,7 @@
 #define VOICE_CMD_FOCUS         0x05  /* 视觉聚焦训练 */
 #define VOICE_CMD_NEGLECT       0x06  /* 空间忽略训练 */
 #define VOICE_CMD_CALIB_MODE    0x07  /* 标定模式 */
-#define VOICE_CMD_PAUSE         0x08  /* 暂停训练 */
-#define VOICE_CMD_RESUME        0x08  /* 继续训练 */
+#define VOICE_CMD_MODE_SWITCH   0x08  /* 模式切换 */
 #define VOICE_CMD_RESTART       0x09  /* 重新开始 */
 #define VOICE_CMD_SKIP          0x0A  /* 跳过这个 */
 
@@ -64,6 +63,16 @@
 #define VOICE_TTS_REACT_SLOW    0x21  /* 反应速度还需提升，继续练习 */
 #define VOICE_TTS_PUR_GOOD      0x22  /* 追踪训练完成，跟踪能力良好 */
 #define VOICE_TTS_PUR_HEAD      0x23  /* 追踪训练完成，尝试减少转头 */
+#define VOICE_TTS_START_CALIB   0x24  /* 请调整好姿态，按确认键开始校准 */
+#define VOICE_TTS_MODE_SELECT   0x25  /* 按一下进入完整训练，按两下进入自选模式 */
+#define VOICE_TTS_NEXT_CONFIRM  0x26  /* 按键确认进入下一个模式 */
+#define VOICE_TTS_START_FIX     0x27  /* 注视训练开始提示 */
+#define VOICE_TTS_START_SAC     0x28  /* 扫视训练开始提示 */
+#define VOICE_TTS_START_PUR     0x29  /* 追踪训练开始提示 */
+#define VOICE_TTS_START_FOCUS   0x2A  /* 聚焦训练开始提示 */
+#define VOICE_TTS_START_NEGLECT 0x2B  /* 空间忽略训练开始提示 */
+#define VOICE_TTS_ENTER_FULL_MODE   0x2C  /* 成功进入完整训练模式 */
+#define VOICE_TTS_ENTER_CUSTOM_MODE 0x2D  /* 成功进入自选模式 */
 
 /* 函数 */
 void Voice_Init(void);

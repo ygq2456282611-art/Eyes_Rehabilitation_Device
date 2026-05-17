@@ -29,6 +29,10 @@ typedef enum {
     SYS_FEEDBACK   = 3,  /* 反馈：播报结果 → 回到 IDLE */
     SYS_PAUSE      = 4,  /* 暂停：姿态异常，自动恢复 */
     SYS_CALIB_SERVO= 5,  /* 常驻标定：按键标记视野边界 */
+    SYS_MODE_SELECT= 6,  /* 模式选择：PA2单击完整模式，双击自选模式 */
+    SYS_TRAIN_PROMPT=7,  /* 训练开始提示：播报后再进入训练 */
+    SYS_NEXT_CONFIRM=8,  /* 完整模式：等待PA2确认进入下一项 */
+    SYS_MODE_ENTER_PROMPT=9, /* 模式进入提示：播报后再进入对应流程 */
 } SystemState_t;
 
 typedef struct {
