@@ -23,6 +23,7 @@
 
 #define APP_CALIB_CMD_GUARD_MS       1200U
 #define APP_TRAIN_SAFETY_GRACE_MS     500U
+#define APP_VOICE_LISTEN_WINDOW_MS   5000U
 
 typedef enum {
     APP_EVENT_NONE = 0,
@@ -98,6 +99,9 @@ static uint8_t  pause_resume_x      = 90;
 static uint8_t  pause_resume_y      = 90;
 static uint8_t  pause_resume_laser  = 0;
 static uint8_t  pause_resume_led    = 0;
+static uint8_t  pause_by_voice      = 0;
+static uint8_t  voice_listen_active = 0;
+static uint32_t voice_listen_start_tick = 0;
 
 /* ===== 运行诊断变量 ===== */
 static uint8_t  last_voice_cmd      = 0;
@@ -172,8 +176,11 @@ static void App_StopStimulus(void);
 static void App_EnterPause(uint8_t play_posture_voice);
 static void App_ResumeFromPause(void);
 static void App_ApplyPauseTime(uint32_t paused_ms);
+static void App_EnterVoiceListenPause(void);
+static void App_CheckVoiceListenTimeout(void);
 static void App_RestartCurrentMode(void);
 static void App_SkipToNextMode(void);
+static void App_SelectModeAndCalibrate(TrainMode_t mode);
 static uint8_t App_IsPauseCmd(uint8_t cmd);
 static uint8_t App_IsResumeCmd(uint8_t cmd);
 static uint8_t App_IsRestartCmd(uint8_t cmd);
@@ -198,6 +205,9 @@ void App_Init(void)
     completed_modes = 0;
     pause_enter_tick = 0;
     paused_ms_last = 0;
+    pause_by_voice = 0;
+    voice_listen_active = 0;
+    voice_listen_start_tick = 0;
     last_voice_cmd = 0;
     last_voice_cmd_tick = 0;
     last_app_event = APP_EVENT_NONE;
@@ -232,22 +242,27 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
     /* ===== 全局命令处理（唤醒词区 TYPE=0x01~0x0F）===== */
     if (VOICE_CMD_IS_WAKE(cmd))
     {
-        /* "你好小盈" — 统一中断信号，停止一切回到 IDLE_VOICE */
+        /* "你好小盈" — 进入静音监听窗口，给后续命令留出说话时间 */
         if (cmd == VOICE_CMD_WAKE_HELLO)
         {
             if (sys_state == SYS_TRAIN || sys_state == SYS_PAUSE)
             {
-                App_StopStimulus();
+                App_EnterVoiceListenPause();
+                return;
             }
-            pause_voice_played = 0;
-            pause_stable_tick = 0;
-            pause_enter_tick = 0;
-            App_Transition(SYS_IDLE_VOICE);
             App_SetEvent(APP_EVENT_WAKE_HELLO);
             return;
         }
 
-        /* "继续训练" — 从 IDLE_VOICE 恢复之前的训练 */
+        if (voice_listen_active && App_IsPauseCmd(cmd))
+        {
+            voice_listen_active = 0;
+            pause_by_voice = 1;
+            App_SetEvent(APP_EVENT_ENTER_PAUSE);
+            return;
+        }
+
+        /* "继续训练" — 仅从可恢复暂停中恢复 */
         if (App_IsResumeCmd(cmd))
         {
             if (sys_state == SYS_PAUSE)
@@ -255,11 +270,8 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
                 App_ResumeFromPause();
                 return;
             }
-            if (sys_state == SYS_IDLE_VOICE)
-            {
-                sys_state = SYS_TRAIN;
-                return;
-            }
+            App_SetEvent(APP_EVENT_CMD_IGNORED);
+            return;
         }
 
         /* 其他唤醒词命令按状态处理 */
@@ -273,6 +285,7 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
                     if (sys_state == SYS_TRAIN)
                     {
                         App_EnterPause(1);
+                        pause_by_voice = 1;
                     }
                     else
                     {
@@ -311,7 +324,7 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
         }
     }
 
-    /* ===== 命令词处理（TYPE=0x00，仅在 IDLE_VOICE 中有效）===== */
+    /* ===== 命令词处理（TYPE=0x00，训练模式可跨状态切换）===== */
     if (cmd > 0 && !VOICE_CMD_IS_WAKE(cmd))
     {
         if ((sys_state == SYS_IDLE_VOICE || sys_state == SYS_TRAIN ||
@@ -324,6 +337,15 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
         if (sys_state == SYS_TRAIN && App_IsPauseCmd(cmd))
         {
             App_EnterPause(1);
+            pause_by_voice = 1;
+            voice_listen_active = 0;
+            return;
+        }
+        if ((sys_state == SYS_PAUSE) && voice_listen_active && App_IsPauseCmd(cmd))
+        {
+            voice_listen_active = 0;
+            pause_by_voice = 1;
+            App_SetEvent(APP_EVENT_ENTER_PAUSE);
             return;
         }
         if (sys_state == SYS_PAUSE && App_IsResumeCmd(cmd))
@@ -348,13 +370,14 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
                 sys_state = SYS_CALIB_SERVO;
                 return;
             }
-            if (cmd >= VOICE_CMD_FIXATION && cmd <= VOICE_CMD_NEGLECT)
-            {
-                train_mode = (TrainMode_t)(cmd - VOICE_CMD_FIXATION);
-                HAL_Delay(600);
-                App_Transition(SYS_CALIBRATE);
-                return;
-            }
+        }
+
+        if ((sys_state == SYS_IDLE_VOICE || sys_state == SYS_TRAIN ||
+             sys_state == SYS_PAUSE || sys_state == SYS_FEEDBACK) &&
+            (cmd >= VOICE_CMD_FIXATION && cmd <= VOICE_CMD_NEGLECT))
+        {
+            App_SelectModeAndCalibrate((TrainMode_t)(cmd - VOICE_CMD_FIXATION));
+            return;
         }
 
         if (cmd != 0)
@@ -362,6 +385,8 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
             App_SetEvent(APP_EVENT_CMD_IGNORED);
         }
     }
+
+    App_CheckVoiceListenTimeout();
 
     /* ===== 状态机分发 ===== */
     switch (sys_state)
@@ -544,6 +569,11 @@ static void App_State_Pause(void)
 {
     uint32_t now = HAL_GetTick();
 
+    if (pause_by_voice)
+    {
+        return;
+    }
+
     if (!pause_voice_played)
     {
         Voice_Play(0xFF, VOICE_TTS_KEEP_STILL);
@@ -672,6 +702,7 @@ static void App_EnterPause(uint8_t play_posture_voice)
     pause_enter_tick = HAL_GetTick();
     pause_stable_tick = 0;
     pause_voice_played = 0;
+    pause_by_voice = 0;
 
     if (play_posture_voice)
     {
@@ -716,6 +747,8 @@ static void App_ResumeFromPause(void)
     pause_voice_played = 0;
     pause_stable_tick = 0;
     pause_enter_tick = 0;
+    pause_by_voice = 0;
+    voice_listen_active = 0;
     sys_state = SYS_TRAIN;
 }
 
@@ -739,6 +772,39 @@ static void App_ApplyPauseTime(uint32_t paused_ms)
         neglect_trial_tick += paused_ms;
 }
 
+static void App_EnterVoiceListenPause(void)
+{
+    if (sys_state == SYS_TRAIN)
+    {
+        App_EnterPause(0);
+    }
+
+    if (sys_state == SYS_PAUSE)
+    {
+        pause_by_voice = 1;
+        voice_listen_active = 1;
+        voice_listen_start_tick = HAL_GetTick();
+        App_SetEvent(APP_EVENT_WAKE_HELLO);
+    }
+}
+
+static void App_CheckVoiceListenTimeout(void)
+{
+    if (!voice_listen_active)
+        return;
+
+    if (sys_state != SYS_PAUSE || !pause_by_voice)
+    {
+        voice_listen_active = 0;
+        return;
+    }
+
+    if ((HAL_GetTick() - voice_listen_start_tick) >= APP_VOICE_LISTEN_WINDOW_MS)
+    {
+        App_ResumeFromPause();
+    }
+}
+
 static void App_RestartCurrentMode(void)
 {
     last_mode_cmd = last_voice_cmd;
@@ -749,6 +815,8 @@ static void App_RestartCurrentMode(void)
     pause_stable_tick = 0;
     pause_voice_played = 0;
     pause_enter_tick = 0;
+    pause_by_voice = 0;
+    voice_listen_active = 0;
     App_Transition(SYS_CALIBRATE);
     App_SetEvent(APP_EVENT_RESTART);
 }
@@ -774,8 +842,28 @@ static void App_SkipToNextMode(void)
     pause_stable_tick = 0;
     pause_voice_played = 0;
     pause_enter_tick = 0;
+    pause_by_voice = 0;
+    voice_listen_active = 0;
     App_Transition(SYS_CALIBRATE);
     App_SetEvent(APP_EVENT_SKIP);
+}
+
+static void App_SelectModeAndCalibrate(TrainMode_t mode)
+{
+    if ((uint8_t)mode >= (uint8_t)MODE_COUNT)
+        return;
+
+    App_StopStimulus();
+    train_mode = mode;
+    record.completed = 0;
+    record.end_tick = HAL_GetTick();
+    pause_stable_tick = 0;
+    pause_voice_played = 0;
+    pause_enter_tick = 0;
+    pause_by_voice = 0;
+    voice_listen_active = 0;
+    HAL_Delay(600);
+    App_Transition(SYS_CALIBRATE);
 }
 
 static uint8_t App_IsPauseCmd(uint8_t cmd)
@@ -867,6 +955,8 @@ static void App_Transition(SystemState_t next_state)
         calib_prompted = 0;
         pause_stable_tick = 0;
         pause_voice_played = 0;
+        pause_by_voice = 0;
+        voice_listen_active = 0;
     }
 
     if (next_state == SYS_TRAIN)
