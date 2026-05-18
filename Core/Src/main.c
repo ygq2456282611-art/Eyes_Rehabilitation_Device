@@ -177,17 +177,6 @@ int main(void)
     HAL_Delay(2000);
 
     /* ==== PA2 按键测试（成功后删除）==== */
-    Laser_Blink(200, 2);
-    while (1)
-    {
-        Key_Scan();
-        if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT)
-        {
-            Buzzer_Alert(2, 150, 100);
-            break;
-        }
-        HAL_Delay(10);
-    }
     /* ================================== */
     //Calibrate_ServoRange();  /* 标定模式已改为语音命令触发 */
   /* USER CODE END 2 */

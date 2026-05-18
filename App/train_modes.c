@@ -23,6 +23,10 @@
 
 #define APP_CALIB_CMD_GUARD_MS       1200U
 #define APP_TRAIN_SAFETY_GRACE_MS     500U
+#define APP_VOICE_LISTEN_WINDOW_MS   5000U
+#define APP_MODE_DOUBLE_CLICK_MS      600U
+#define APP_TRAIN_START_PROMPT_MS    4000U
+#define APP_MODE_ENTER_PROMPT_MS     2500U
 
 typedef enum {
     APP_EVENT_NONE = 0,
@@ -37,12 +41,20 @@ typedef enum {
     APP_EVENT_ENTER_IDLE = 9,
     APP_EVENT_WAKE_HELLO = 10,
     APP_EVENT_CMD_IGNORED = 11,
+    APP_EVENT_MODE_SELECT = 12,
+    APP_EVENT_NEXT_CONFIRM = 13,
 } AppEvent_t;
+
+typedef enum {
+    APP_FLOW_FULL = 0,
+    APP_FLOW_CUSTOM = 1,
+} AppFlowMode_t;
 
 /* ===== 全局状态 ===== */
 static SystemState_t   sys_state   = SYS_IDLE_VOICE;
 static TrainMode_t     train_mode  = MODE_A_FIXATION;
 static TrainingRecord_t record;
+static AppFlowMode_t   flow_mode   = APP_FLOW_CUSTOM;
 
 /* ===== 训练内部时间基准 ===== */
 static uint32_t timebase        = 0;
@@ -98,6 +110,9 @@ static uint8_t  pause_resume_x      = 90;
 static uint8_t  pause_resume_y      = 90;
 static uint8_t  pause_resume_laser  = 0;
 static uint8_t  pause_resume_led    = 0;
+static uint8_t  pause_by_voice      = 0;
+static uint8_t  voice_listen_active = 0;
+static uint32_t voice_listen_start_tick = 0;
 
 /* ===== 运行诊断变量 ===== */
 static uint8_t  last_voice_cmd      = 0;
@@ -106,6 +121,16 @@ static uint8_t  last_app_event      = APP_EVENT_NONE;
 static uint32_t last_mode_cmd_tick  = 0;
 static uint8_t  last_mode_cmd       = 0;
 static uint32_t train_entry_tick    = 0;
+static uint8_t  mode_select_prompted = 0;
+static uint8_t  mode_select_clicks = 0;
+static uint32_t mode_select_first_tick = 0;
+static uint8_t  train_prompt_played = 0;
+static uint32_t train_prompt_tick = 0;
+static uint8_t  next_confirm_prompted = 0;
+static uint8_t  next_confirm_advance = 1;
+static AppFlowMode_t pending_flow_mode = APP_FLOW_CUSTOM;
+static uint8_t  mode_enter_prompted = 0;
+static uint32_t mode_enter_prompt_tick = 0;
 
 /* ===== 应用层记录的舵机目标角度 ===== */
 static uint8_t  app_servo_x = 90;
@@ -147,11 +172,23 @@ static const uint8_t mode_voice_id[MODE_COUNT] = {
     VOICE_CMD_NEGLECT    /* E */
 };
 
+static const uint8_t mode_start_tts_id[MODE_COUNT] = {
+    VOICE_TTS_START_FIX,
+    VOICE_TTS_START_SAC,
+    VOICE_TTS_START_PUR,
+    VOICE_TTS_START_FOCUS,
+    VOICE_TTS_START_NEGLECT
+};
+
 /* 内部函数 */
+static void App_State_ModeSelect(void);
+static void App_State_ModeEnterPrompt(void);
 static void App_State_Calibrate(void);
+static void App_State_TrainPrompt(void);
 static void App_State_Train(void);
 static void App_State_Feedback(void);
 static void App_State_Pause(void);
+static void App_State_NextConfirm(void);
 
 static void Train_Fixation(void);
 static void Train_Saccade(void);
@@ -172,13 +209,21 @@ static void App_StopStimulus(void);
 static void App_EnterPause(uint8_t play_posture_voice);
 static void App_ResumeFromPause(void);
 static void App_ApplyPauseTime(uint32_t paused_ms);
+static void App_EnterVoiceListenPause(void);
+static void App_CheckVoiceListenTimeout(void);
+static void App_EnterModeSelect(void);
+static void App_StartFullMode(void);
+static void App_StartCustomMode(void);
 static void App_RestartCurrentMode(void);
 static void App_SkipToNextMode(void);
+static void App_SelectModeAndCalibrate(TrainMode_t mode);
 static uint8_t App_IsPauseCmd(uint8_t cmd);
 static uint8_t App_IsResumeCmd(uint8_t cmd);
 static uint8_t App_IsRestartCmd(uint8_t cmd);
 static uint8_t App_IsSkipCmd(uint8_t cmd);
+static uint8_t App_IsModeSwitchCmd(uint8_t cmd);
 static TrainMode_t App_NextMode(TrainMode_t mode);
+static uint8_t App_IsLastFullMode(void);
 static void Pursuit_Reset(void);
 static void Pursuit_SetTarget(uint8_t idx);
 static void Pursuit_AdvancePoint(uint32_t now);
@@ -191,19 +236,33 @@ void Calibrate_ServoRange(void);
  */
 void App_Init(void)
 {
-    sys_state  = SYS_IDLE_VOICE;
+    sys_state  = SYS_MODE_SELECT;
     train_mode = MODE_A_FIXATION;
+    flow_mode = APP_FLOW_CUSTOM;
     memset(&record, 0, sizeof(TrainingRecord_t));
     timebase = HAL_GetTick();
     completed_modes = 0;
     pause_enter_tick = 0;
     paused_ms_last = 0;
+    pause_by_voice = 0;
+    voice_listen_active = 0;
+    voice_listen_start_tick = 0;
     last_voice_cmd = 0;
     last_voice_cmd_tick = 0;
     last_app_event = APP_EVENT_NONE;
     last_mode_cmd_tick = 0;
     last_mode_cmd = 0;
     train_entry_tick = 0;
+    mode_select_prompted = 0;
+    mode_select_clicks = 0;
+    mode_select_first_tick = 0;
+    train_prompt_played = 0;
+    train_prompt_tick = 0;
+    next_confirm_prompted = 0;
+    next_confirm_advance = 1;
+    pending_flow_mode = APP_FLOW_CUSTOM;
+    mode_enter_prompted = 0;
+    mode_enter_prompt_tick = 0;
     app_servo_x = 90;
     app_servo_y = 90;
     app_laser_on = 0;
@@ -229,25 +288,36 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
     if ((sys_state == SYS_CALIBRATE) && App_ShouldIgnoreCalibCmd(cmd))
         cmd = 0;
 
+    if (cmd != 0 && App_IsModeSwitchCmd(cmd))
+    {
+        App_EnterModeSelect();
+        return;
+    }
+
     /* ===== 全局命令处理（唤醒词区 TYPE=0x01~0x0F）===== */
     if (VOICE_CMD_IS_WAKE(cmd))
     {
-        /* "你好小盈" — 统一中断信号，停止一切回到 IDLE_VOICE */
+        /* "你好小盈" — 进入静音监听窗口，给后续命令留出说话时间 */
         if (cmd == VOICE_CMD_WAKE_HELLO)
         {
             if (sys_state == SYS_TRAIN || sys_state == SYS_PAUSE)
             {
-                App_StopStimulus();
+                App_EnterVoiceListenPause();
+                return;
             }
-            pause_voice_played = 0;
-            pause_stable_tick = 0;
-            pause_enter_tick = 0;
-            App_Transition(SYS_IDLE_VOICE);
             App_SetEvent(APP_EVENT_WAKE_HELLO);
             return;
         }
 
-        /* "继续训练" — 从 IDLE_VOICE 恢复之前的训练 */
+        if (voice_listen_active && App_IsPauseCmd(cmd))
+        {
+            voice_listen_active = 0;
+            pause_by_voice = 1;
+            App_SetEvent(APP_EVENT_ENTER_PAUSE);
+            return;
+        }
+
+        /* "继续训练" — 仅从可恢复暂停中恢复 */
         if (App_IsResumeCmd(cmd))
         {
             if (sys_state == SYS_PAUSE)
@@ -255,11 +325,8 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
                 App_ResumeFromPause();
                 return;
             }
-            if (sys_state == SYS_IDLE_VOICE)
-            {
-                sys_state = SYS_TRAIN;
-                return;
-            }
+            App_SetEvent(APP_EVENT_CMD_IGNORED);
+            return;
         }
 
         /* 其他唤醒词命令按状态处理 */
@@ -273,6 +340,7 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
                     if (sys_state == SYS_TRAIN)
                     {
                         App_EnterPause(1);
+                        pause_by_voice = 1;
                     }
                     else
                     {
@@ -311,7 +379,7 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
         }
     }
 
-    /* ===== 命令词处理（TYPE=0x00，仅在 IDLE_VOICE 中有效）===== */
+    /* ===== 命令词处理（TYPE=0x00，训练模式可跨状态切换）===== */
     if (cmd > 0 && !VOICE_CMD_IS_WAKE(cmd))
     {
         if ((sys_state == SYS_IDLE_VOICE || sys_state == SYS_TRAIN ||
@@ -324,6 +392,15 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
         if (sys_state == SYS_TRAIN && App_IsPauseCmd(cmd))
         {
             App_EnterPause(1);
+            pause_by_voice = 1;
+            voice_listen_active = 0;
+            return;
+        }
+        if ((sys_state == SYS_PAUSE) && voice_listen_active && App_IsPauseCmd(cmd))
+        {
+            voice_listen_active = 0;
+            pause_by_voice = 1;
+            App_SetEvent(APP_EVENT_ENTER_PAUSE);
             return;
         }
         if (sys_state == SYS_PAUSE && App_IsResumeCmd(cmd))
@@ -348,13 +425,14 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
                 sys_state = SYS_CALIB_SERVO;
                 return;
             }
-            if (cmd >= VOICE_CMD_FIXATION && cmd <= VOICE_CMD_NEGLECT)
-            {
-                train_mode = (TrainMode_t)(cmd - VOICE_CMD_FIXATION);
-                HAL_Delay(600);
-                App_Transition(SYS_CALIBRATE);
-                return;
-            }
+        }
+
+        if ((sys_state == SYS_IDLE_VOICE || sys_state == SYS_TRAIN ||
+             sys_state == SYS_PAUSE || sys_state == SYS_FEEDBACK) &&
+            (cmd >= VOICE_CMD_FIXATION && cmd <= VOICE_CMD_NEGLECT))
+        {
+            App_SelectModeAndCalibrate((TrainMode_t)(cmd - VOICE_CMD_FIXATION));
+            return;
         }
 
         if (cmd != 0)
@@ -363,11 +441,16 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
         }
     }
 
+    App_CheckVoiceListenTimeout();
+
     /* ===== 状态机分发 ===== */
     switch (sys_state)
     {
         case SYS_IDLE_VOICE: break;
+        case SYS_MODE_SELECT: App_State_ModeSelect(); break;
+        case SYS_MODE_ENTER_PROMPT: App_State_ModeEnterPrompt(); break;
         case SYS_CALIBRATE:  App_State_Calibrate(); break;
+        case SYS_TRAIN_PROMPT: App_State_TrainPrompt(); break;
         case SYS_TRAIN:
             if (train_mode != MODE_A_FIXATION)
                 App_SafetyCheck();
@@ -376,6 +459,7 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
             break;
         case SYS_FEEDBACK:   App_State_Feedback();  break;
         case SYS_PAUSE:      App_State_Pause();     break;
+        case SYS_NEXT_CONFIRM: App_State_NextConfirm(); break;
         case SYS_CALIB_SERVO: State_CalibServo();   break;
     }
 }
@@ -419,6 +503,77 @@ static void App_State_IdleVoice(void)
     App_Transition(SYS_CALIBRATE);
 }
 
+static void App_State_ModeSelect(void)
+{
+    uint32_t now = HAL_GetTick();
+    KeyEvent_t key_event;
+
+    if (!mode_select_prompted)
+    {
+        App_StopStimulus();
+        (void)Key_GetEvent(KEY_PATIENT);
+        Voice_Play(0xFF, VOICE_TTS_MODE_SELECT);
+        voice_cooldown = now;
+        mode_select_prompted = 1;
+        mode_select_clicks = 0;
+        mode_select_first_tick = 0;
+        return;
+    }
+
+    key_event = Key_GetEvent(KEY_PATIENT);
+    if (key_event == KEY_EVENT_SHORT)
+    {
+        if (mode_select_clicks == 0)
+        {
+            mode_select_clicks = 1;
+            mode_select_first_tick = now;
+        }
+        else
+        {
+            App_StartCustomMode();
+            return;
+        }
+    }
+
+    if (mode_select_clicks == 1 && (now - mode_select_first_tick) >= APP_MODE_DOUBLE_CLICK_MS)
+    {
+        App_StartFullMode();
+    }
+}
+
+static void App_State_ModeEnterPrompt(void)
+{
+    uint32_t now = HAL_GetTick();
+
+    if (!mode_enter_prompted)
+    {
+        App_StopStimulus();
+        Voice_Play(0xFF, (pending_flow_mode == APP_FLOW_FULL) ?
+                   VOICE_TTS_ENTER_FULL_MODE : VOICE_TTS_ENTER_CUSTOM_MODE);
+        voice_cooldown = now;
+        mode_enter_prompt_tick = now;
+        mode_enter_prompted = 1;
+        return;
+    }
+
+    if ((now - mode_enter_prompt_tick) < APP_MODE_ENTER_PROMPT_MS)
+        return;
+
+    mode_enter_prompted = 0;
+    flow_mode = pending_flow_mode;
+    completed_modes = 0;
+
+    if (flow_mode == APP_FLOW_FULL)
+    {
+        train_mode = MODE_A_FIXATION;
+        App_Transition(SYS_CALIBRATE);
+    }
+    else
+    {
+        App_Transition(SYS_IDLE_VOICE);
+    }
+}
+
 /**
  * @brief  校准状态
  */
@@ -428,7 +583,7 @@ static void App_State_Calibrate(void)
     {
         App_StopStimulus();
         (void)Key_GetEvent(KEY_PATIENT);
-        Voice_Play(0xFF, VOICE_TTS_KEEP_STILL);
+        Voice_Play(0xFF, VOICE_TTS_START_CALIB);
         voice_cooldown = HAL_GetTick();
         calib_prompted = 1;
         return;
@@ -442,6 +597,27 @@ static void App_State_Calibrate(void)
         Voice_Play(0xFF, VOICE_TTS_CALIB_DONE);
         voice_cooldown = HAL_GetTick();
         calib_prompted = 0;
+        App_Transition(SYS_TRAIN_PROMPT);
+    }
+}
+
+static void App_State_TrainPrompt(void)
+{
+    uint32_t now = HAL_GetTick();
+
+    if (!train_prompt_played)
+    {
+        App_StopStimulus();
+        Voice_Play(0xFF, mode_start_tts_id[(uint8_t)train_mode]);
+        voice_cooldown = now;
+        train_prompt_tick = now;
+        train_prompt_played = 1;
+        return;
+    }
+
+    if ((now - train_prompt_tick) >= APP_TRAIN_START_PROMPT_MS)
+    {
+        train_prompt_played = 0;
         App_Transition(SYS_TRAIN);
     }
 }
@@ -527,14 +703,45 @@ static void App_State_Feedback(void)
             break;
     }
 
-    if (completed_modes >= 5)
+    if (flow_mode == APP_FLOW_FULL && App_IsLastFullMode())
     {
         Voice_Play(0xFF, VOICE_TTS_ALL_DONE);
         HAL_Delay(4000);
         completed_modes = 0;
+        App_EnterModeSelect();
+        return;
     }
 
-    App_Transition(SYS_IDLE_VOICE);
+    if (flow_mode == APP_FLOW_FULL)
+    {
+        next_confirm_advance = 1;
+        App_Transition(SYS_NEXT_CONFIRM);
+    }
+    else
+    {
+        App_Transition(SYS_IDLE_VOICE);
+    }
+}
+
+static void App_State_NextConfirm(void)
+{
+    if (!next_confirm_prompted)
+    {
+        App_StopStimulus();
+        (void)Key_GetEvent(KEY_PATIENT);
+        Voice_Play(0xFF, VOICE_TTS_NEXT_CONFIRM);
+        voice_cooldown = HAL_GetTick();
+        next_confirm_prompted = 1;
+        return;
+    }
+
+    if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT)
+    {
+        next_confirm_prompted = 0;
+        if (next_confirm_advance)
+            train_mode = App_NextMode(train_mode);
+        App_Transition(SYS_CALIBRATE);
+    }
 }
 
 /**
@@ -543,6 +750,11 @@ static void App_State_Feedback(void)
 static void App_State_Pause(void)
 {
     uint32_t now = HAL_GetTick();
+
+    if (pause_by_voice)
+    {
+        return;
+    }
 
     if (!pause_voice_played)
     {
@@ -672,6 +884,7 @@ static void App_EnterPause(uint8_t play_posture_voice)
     pause_enter_tick = HAL_GetTick();
     pause_stable_tick = 0;
     pause_voice_played = 0;
+    pause_by_voice = 0;
 
     if (play_posture_voice)
     {
@@ -716,6 +929,8 @@ static void App_ResumeFromPause(void)
     pause_voice_played = 0;
     pause_stable_tick = 0;
     pause_enter_tick = 0;
+    pause_by_voice = 0;
+    voice_listen_active = 0;
     sys_state = SYS_TRAIN;
 }
 
@@ -739,6 +954,73 @@ static void App_ApplyPauseTime(uint32_t paused_ms)
         neglect_trial_tick += paused_ms;
 }
 
+static void App_EnterVoiceListenPause(void)
+{
+    if (sys_state == SYS_TRAIN)
+    {
+        App_EnterPause(0);
+    }
+
+    if (sys_state == SYS_PAUSE)
+    {
+        pause_by_voice = 1;
+        voice_listen_active = 1;
+        voice_listen_start_tick = HAL_GetTick();
+        App_SetEvent(APP_EVENT_WAKE_HELLO);
+    }
+}
+
+static void App_CheckVoiceListenTimeout(void)
+{
+    if (!voice_listen_active)
+        return;
+
+    if (sys_state != SYS_PAUSE || !pause_by_voice)
+    {
+        voice_listen_active = 0;
+        return;
+    }
+
+    if ((HAL_GetTick() - voice_listen_start_tick) >= APP_VOICE_LISTEN_WINDOW_MS)
+    {
+        App_ResumeFromPause();
+    }
+}
+
+static void App_EnterModeSelect(void)
+{
+    App_StopStimulus();
+    record.completed = 0;
+    pause_stable_tick = 0;
+    pause_voice_played = 0;
+    pause_enter_tick = 0;
+    pause_by_voice = 0;
+    voice_listen_active = 0;
+    mode_select_prompted = 0;
+    mode_select_clicks = 0;
+    mode_select_first_tick = 0;
+    next_confirm_prompted = 0;
+    App_Transition(SYS_MODE_SELECT);
+}
+
+static void App_StartFullMode(void)
+{
+    pending_flow_mode = APP_FLOW_FULL;
+    mode_select_prompted = 0;
+    mode_select_clicks = 0;
+    mode_enter_prompted = 0;
+    App_Transition(SYS_MODE_ENTER_PROMPT);
+}
+
+static void App_StartCustomMode(void)
+{
+    pending_flow_mode = APP_FLOW_CUSTOM;
+    mode_select_prompted = 0;
+    mode_select_clicks = 0;
+    mode_enter_prompted = 0;
+    App_Transition(SYS_MODE_ENTER_PROMPT);
+}
+
 static void App_RestartCurrentMode(void)
 {
     last_mode_cmd = last_voice_cmd;
@@ -749,6 +1031,8 @@ static void App_RestartCurrentMode(void)
     pause_stable_tick = 0;
     pause_voice_played = 0;
     pause_enter_tick = 0;
+    pause_by_voice = 0;
+    voice_listen_active = 0;
     App_Transition(SYS_CALIBRATE);
     App_SetEvent(APP_EVENT_RESTART);
 }
@@ -768,24 +1052,53 @@ static void App_SkipToNextMode(void)
     App_StopStimulus();
     record.completed = 0;
     record.end_tick = HAL_GetTick();
-    Voice_Play(0xFF, VOICE_TTS_NEXT_PREP);
-    voice_cooldown = HAL_GetTick();
     train_mode = App_NextMode(train_mode);
     pause_stable_tick = 0;
     pause_voice_played = 0;
     pause_enter_tick = 0;
-    App_Transition(SYS_CALIBRATE);
+    pause_by_voice = 0;
+    voice_listen_active = 0;
+
+    if (flow_mode == APP_FLOW_FULL)
+    {
+        next_confirm_advance = 0;
+        App_Transition(SYS_NEXT_CONFIRM);
+    }
+    else
+    {
+        Voice_Play(0xFF, VOICE_TTS_NEXT_PREP);
+        voice_cooldown = HAL_GetTick();
+        App_Transition(SYS_CALIBRATE);
+    }
     App_SetEvent(APP_EVENT_SKIP);
+}
+
+static void App_SelectModeAndCalibrate(TrainMode_t mode)
+{
+    if ((uint8_t)mode >= (uint8_t)MODE_COUNT)
+        return;
+
+    App_StopStimulus();
+    train_mode = mode;
+    record.completed = 0;
+    record.end_tick = HAL_GetTick();
+    pause_stable_tick = 0;
+    pause_voice_played = 0;
+    pause_enter_tick = 0;
+    pause_by_voice = 0;
+    voice_listen_active = 0;
+    HAL_Delay(600);
+    App_Transition(SYS_CALIBRATE);
 }
 
 static uint8_t App_IsPauseCmd(uint8_t cmd)
 {
-    return (cmd == VOICE_CMD_WAKE_PAUSE || cmd == VOICE_CMD_PAUSE);
+    return (cmd == VOICE_CMD_WAKE_PAUSE);
 }
 
 static uint8_t App_IsResumeCmd(uint8_t cmd)
 {
-    return (cmd == VOICE_CMD_WAKE_RESUME || cmd == VOICE_CMD_RESUME);
+    return (cmd == VOICE_CMD_WAKE_RESUME);
 }
 
 static uint8_t App_IsRestartCmd(uint8_t cmd)
@@ -796,6 +1109,16 @@ static uint8_t App_IsRestartCmd(uint8_t cmd)
 static uint8_t App_IsSkipCmd(uint8_t cmd)
 {
     return (cmd == VOICE_CMD_WAKE_SKIP || cmd == VOICE_CMD_SKIP);
+}
+
+static uint8_t App_IsModeSwitchCmd(uint8_t cmd)
+{
+    return (cmd == VOICE_CMD_MODE_SWITCH);
+}
+
+static uint8_t App_IsLastFullMode(void)
+{
+    return (train_mode == MODE_E_NEGLECT);
 }
 
 static float SmoothStep(float x)
@@ -865,8 +1188,17 @@ static void App_Transition(SystemState_t next_state)
     {
         App_SetEvent(APP_EVENT_ENTER_CALIB);
         calib_prompted = 0;
+        train_prompt_played = 0;
         pause_stable_tick = 0;
         pause_voice_played = 0;
+        pause_by_voice = 0;
+        voice_listen_active = 0;
+    }
+
+    if (next_state == SYS_TRAIN_PROMPT)
+    {
+        train_prompt_played = 0;
+        train_prompt_tick = 0;
     }
 
     if (next_state == SYS_TRAIN)
@@ -899,6 +1231,27 @@ static void App_Transition(SystemState_t next_state)
     if (next_state == SYS_IDLE_VOICE)
     {
         App_SetEvent(APP_EVENT_ENTER_IDLE);
+    }
+
+    if (next_state == SYS_MODE_SELECT)
+    {
+        App_SetEvent(APP_EVENT_MODE_SELECT);
+        mode_select_prompted = 0;
+        mode_select_clicks = 0;
+        mode_select_first_tick = 0;
+        mode_enter_prompted = 0;
+    }
+
+    if (next_state == SYS_MODE_ENTER_PROMPT)
+    {
+        mode_enter_prompted = 0;
+        mode_enter_prompt_tick = 0;
+    }
+
+    if (next_state == SYS_NEXT_CONFIRM)
+    {
+        App_SetEvent(APP_EVENT_NEXT_CONFIRM);
+        next_confirm_prompted = 0;
     }
 }
 
