@@ -1,4 +1,21 @@
-﻿#include "BMI088driver.h"
+﻿/*============================================================================
+ *  BMI088driver.c — BMI088 (6 轴 IMU) 底层驱动与姿态解算
+ *
+ *  功能概览:
+ *    - SPI/DMA 双缓冲乒乓读取加速度计、陀螺仪、温度数据
+ *    - 陀螺仪零偏校准 (首次静态累积 + 运行期自适应跟踪)
+ *    - 四元数姿态解算 (陀螺仪积分 + 加速度计补偿 SLERP 融合)
+ *    - 欧拉角输出 (Roll / Pitch / Yaw, 相对参考系)
+ *    - 静态检测 (用于零偏跟踪和校准触发)
+ *
+ *  传感器配置:
+ *    ACC:  3G 量程, 800Hz ODR, 正常模式
+ *    GYRO: 2000 deg/s, 116Hz BW, 正常模式
+ *
+ *  通信:
+ *    SPI2, DMA 传输, 陀螺仪/加速度计各有独立片选和 DRDY EXTI
+ *============================================================================*/
+#include "BMI088driver.h"
 
 #include <math.h>
 #include <string.h>
@@ -6,21 +23,37 @@
 #include "BMI088Middleware.h"
 #include "BMI088reg.h"
 
+/* SPI 通信哑元字节 */
 #define BMI088_DUMMY_BYTE 0x55U
+/* 每 N 次加速度采样触发一次温度读取 */
 #define BMI088_TEMP_READ_DIV 50U
+/* 弧度转角度系数 */
 #define BMI088_RAD_TO_DEG 57.2957795f
+/* 重力加速度标准值 (m/s^2) */
 #define BMI088_GRAVITY_NORM 9.80665f
+/* 静态检测：陀螺仪模值阈值 (deg/s) */
 #define BMI088_STATIC_GYRO_NORM_THRESHOLD 0.08f
+/* 静态检测：加速度计模值与重力偏差阈值 (m/s^2) */
 #define BMI088_STATIC_ACCEL_NORM_THRESHOLD 1.0f
+/* 陀螺仪零偏校准采样数 (800 次 ≈ 传感器稳态后约 1s) */
 #define BMI088_BIAS_CALIB_SAMPLES 800U
+/* 运行时零偏跟踪系数 (一阶低通) */
 #define BMI088_BIAS_TRACK_ALPHA 0.0025f
+/* AHRS 加速度补偿增益 */
 #define BMI088_AHRS_CORRECTION_GAIN 2.8f
+/* 陀螺仪超时回退间隔 (us) */
 #define BMI088_GYRO_FALLBACK_INTERVAL_US 3000U
+/* 加速度计超时回退间隔 (us) */
 #define BMI088_ACCEL_FALLBACK_INTERVAL_US 3000U
 
 float BMI088_ACCEL_SEN = BMI088_ACCEL_3G_SEN;
 float BMI088_GYRO_SEN = BMI088_GYRO_2000_SEN;
 
+/*===========================================================================
+ *  SPI 读写宏
+ *  加速度计和陀螺仪片选独立管理, 通过 NS_L/NS_H 拉低/释放片选
+ *  读操作: 先发寄存器地址 | 0x80 (读标志), 再接收数据字节
+ *===========================================================================*/
 #if defined(BMI088_USE_SPI)
 #define BMI088_accel_write_single_reg(reg, data) \
     {                                            \
@@ -66,6 +99,7 @@ typedef enum
     BMI088_DMA_TRANS_TEMP
 } bmi088_dma_transaction_t;
 
+/* 加速度计初始化配置表: [0]=寄存器地址, [1]=写入值, [2]=失败返回码 */
 static uint8_t write_BMI088_accel_reg_data_error[BMI088_WRITE_ACCEL_REG_NUM][3] =
 {
     {BMI088_ACC_PWR_CTRL, BMI088_ACC_ENABLE_ACC_ON, BMI088_ACC_PWR_CTRL_ERROR},
@@ -76,6 +110,7 @@ static uint8_t write_BMI088_accel_reg_data_error[BMI088_WRITE_ACCEL_REG_NUM][3] 
     {BMI088_INT_MAP_DATA, BMI088_ACC_INT1_DRDY_INTERRUPT, BMI088_INT_MAP_DATA_ERROR}
 };
 
+/* 陀螺仪初始化配置表 */
 static uint8_t write_BMI088_gyro_reg_data_error[BMI088_WRITE_GYRO_REG_NUM][3] =
 {
     {BMI088_GYRO_RANGE, BMI088_GYRO_2000, BMI088_GYRO_RANGE_ERROR},
@@ -86,33 +121,41 @@ static uint8_t write_BMI088_gyro_reg_data_error[BMI088_WRITE_GYRO_REG_NUM][3] =
     {BMI088_GYRO_INT3_INT4_IO_MAP, BMI088_GYRO_DRDY_IO_INT3, BMI088_GYRO_INT3_INT4_IO_MAP_ERROR}
 };
 
-static volatile uint8_t bmi088_async_started = 0U;
-static volatile uint8_t bmi088_spi_busy = 0U;
-static volatile uint8_t bmi088_gyro_pending = 0U;
-static volatile uint8_t bmi088_accel_pending = 0U;
-static volatile uint8_t bmi088_temp_pending = 0U;
-static volatile uint8_t bmi088_new_gyro_sample = 0U;
-static volatile uint8_t bmi088_last_error = 0U;
-static volatile uint32_t bmi088_accel_sample_count = 0U;
-static volatile uint32_t bmi088_last_gyro_update_us = 0U;
-static volatile uint32_t bmi088_bias_calib_count = 0U;
-static volatile bmi088_dma_transaction_t bmi088_active_transaction = BMI088_DMA_TRANS_NONE;
-static volatile uint32_t bmi088_acc_exti_count = 0U;
-static volatile uint32_t bmi088_gyro_exti_count = 0U;
-static volatile uint32_t bmi088_gyro_dma_count = 0U;
-static volatile uint32_t bmi088_accel_dma_count = 0U;
-static volatile uint32_t bmi088_temp_dma_count = 0U;
-static volatile uint32_t bmi088_dma_error_count = 0U;
+/* ===== 运行状态标志 ===== */
+static volatile uint8_t bmi088_async_started = 0U;        /* 异步采集已启动 */
+static volatile uint8_t bmi088_spi_busy = 0U;             /* SPI 总线忙标志 */
+static volatile uint8_t bmi088_gyro_pending = 0U;         /* 陀螺仪待读取 */
+static volatile uint8_t bmi088_accel_pending = 0U;        /* 加速度计待读取 */
+static volatile uint8_t bmi088_temp_pending = 0U;         /* 温度待读取 */
+static volatile uint8_t bmi088_new_gyro_sample = 0U;      /* 陀螺仪新数据就绪标志 */
+static volatile uint8_t bmi088_last_error = 0U;           /* 最近一次错误码 */
+static volatile uint32_t bmi088_accel_sample_count = 0U;  /* 加速度采样计数器，用于定时触发温度读 */
+static volatile uint32_t bmi088_last_gyro_update_us = 0U; /* 上次陀螺仪更新时间戳 (us) */
+static volatile uint32_t bmi088_bias_calib_count = 0U;    /* 零偏校准采样累计数 */
 
-static volatile bmi088_raw_data_t bmi088_raw_cache;
-static volatile bmi088_real_data_t bmi088_real_cache;
-static volatile bmi088_attitude_t bmi088_attitude_cache;
-static volatile float bmi088_quat_now[4];
-static volatile float bmi088_quat_ref[4];
-static volatile float bmi088_gyro_bias[3];
-static volatile float bmi088_gyro_bias_sum[3];
-static volatile uint8_t bmi088_attitude_calibrated = 0U;
-static volatile uint8_t bmi088_is_static = 0U;
+/* ===== DMA 事务管理 ===== */
+static volatile bmi088_dma_transaction_t bmi088_active_transaction = BMI088_DMA_TRANS_NONE;
+
+/* ===== 调试计数器 ===== */
+static volatile uint32_t bmi088_acc_exti_count = 0U;      /* 加速度计 EXTI 中断次数 */
+static volatile uint32_t bmi088_gyro_exti_count = 0U;     /* 陀螺仪 EXTI 中断次数 */
+static volatile uint32_t bmi088_gyro_dma_count = 0U;      /* 陀螺仪 DMA 完成次数 */
+static volatile uint32_t bmi088_accel_dma_count = 0U;     /* 加速度 DMA 完成次数 */
+static volatile uint32_t bmi088_temp_dma_count = 0U;      /* 温度 DMA 完成次数 */
+static volatile uint32_t bmi088_dma_error_count = 0U;     /* DMA 错误次数 */
+
+/* ===== 数据缓存 ===== */
+static volatile bmi088_raw_data_t bmi088_raw_cache;       /* 原始数据缓存 */
+static volatile bmi088_real_data_t bmi088_real_cache;     /* 物理量数据缓存 (单位: g, deg/s, °C) */
+static volatile bmi088_attitude_t bmi088_attitude_cache;  /* 姿态缓存 (欧拉角 + 四元数 + dt) */
+
+/* ===== 姿态与校准 ===== */
+static volatile float bmi088_quat_now[4];                 /* 当前姿态四元数 */
+static volatile float bmi088_quat_ref[4];                 /* 参考(基准)姿态四元数 */
+static volatile float bmi088_gyro_bias[3];                /* 陀螺仪零偏 (deg/s) */
+static volatile float bmi088_gyro_bias_sum[3];            /* 零偏校准累加和 */
+static volatile uint8_t bmi088_attitude_calibrated = 0U;  /* 校准完成标志 */
+static volatile uint8_t bmi088_is_static = 0U;            /* 传感器是否处于静态 */
 
 static uint8_t bmi088_tx_buffer[8];
 static uint8_t bmi088_rx_buffer[8];
@@ -146,6 +189,10 @@ static float BMI088_vector_norm3(const float vec[3]);
 static void BMI088_update_static_and_bias(const float gyro_meas[3], const float accel[3]);
 static void BMI088_refresh_attitude_cache(uint32_t timestamp_us, float dt);
 
+/**
+ * @brief  传感器初始化 (GPIO + 通信 + 加速度计 + 陀螺仪)
+ * @return 0=成功, 非零=各阶段错误码的 OR 组合
+ */
 uint8_t BMI088_init(void)
 {
     uint8_t error = BMI088_NO_ERROR;
@@ -159,6 +206,10 @@ uint8_t BMI088_init(void)
     return error;
 }
 
+/**
+ * @brief  加速度计初始化: 读 ID -> 软复位 -> 写配置 -> 回读校验
+ * @return BMI088_NO_ERROR 或各配置阶段的错误码
+ */
 uint8_t bmi088_accel_init(void)
 {
     uint8_t res = 0U;
@@ -199,6 +250,10 @@ uint8_t bmi088_accel_init(void)
     return BMI088_NO_ERROR;
 }
 
+/**
+ * @brief  陀螺仪初始化: 读 ID -> 软复位 -> 写配置 -> 回读校验
+ * @return BMI088_NO_ERROR 或各配置阶段的错误码
+ */
 uint8_t bmi088_gyro_init(void)
 {
     uint8_t write_reg_num = 0U;
@@ -239,6 +294,10 @@ uint8_t bmi088_gyro_init(void)
     return BMI088_NO_ERROR;
 }
 
+/**
+ * @brief  启动异步 DMA 采集
+ *         清中断标志 -> 复位运行状态 -> 设 pending 标志 -> 启动首笔 DMA
+ */
 void BMI088_AsyncStart(void)
 {
     uint32_t primask = 0U;
@@ -257,6 +316,10 @@ void BMI088_AsyncStart(void)
     BMI088_try_start_next_transaction();
 }
 
+/**
+ * @brief  外部中断回调: 传感器 DRDY 信号触发
+ *         设置对应 pending 标志, 由 BMI088_Task 调度 DMA 读取
+ */
 void BMI088_EXTI_Callback(uint16_t GPIO_Pin)
 {
     uint32_t primask = 0U;
@@ -288,6 +351,11 @@ void BMI088_EXTI_Callback(uint16_t GPIO_Pin)
     BMI088_try_start_next_transaction();
 }
 
+/**
+ * @brief  周期性任务 (通常在 main loop 中调用)
+ *         检查陀螺仪/加速度计是否超时未更新, 超时则触发 DMA 回退
+ *         配合 EXTI 中断实现"中断驱动 + 定时回退"的双重保障
+ */
 void BMI088_Task(void)
 {
     uint32_t now_us = 0U;
@@ -555,6 +623,10 @@ void BMI088_ClearNewSampleFlag(void)
     BMI088_ExitCritical(primask);
 }
 
+/**
+ * @brief  SPI DMA 传输完成回调
+ *         解析对应传感器帧数据 -> 释放片选 -> 发起下一笔传输
+ */
 void BMI088_DMA_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 {
     bmi088_dma_transaction_t transaction = BMI088_DMA_TRANS_NONE;
@@ -596,6 +668,10 @@ void BMI088_DMA_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
     BMI088_try_start_next_transaction();
 }
 
+/**
+ * @brief  SPI DMA 传输错误回调
+ *         放弃片选 -> 中止 DMA -> 恢复 pending -> 尝试下一笔
+ */
 void BMI088_DMA_ErrorCallback(SPI_HandleTypeDef *hspi)
 {
     bmi088_dma_transaction_t transaction = BMI088_DMA_TRANS_NONE;
@@ -991,6 +1067,22 @@ static void BMI088_parse_temp_frame(uint32_t timestamp_us)
     bmi088_real_cache.temp_timestamp_us = timestamp_us;
 }
 
+/**
+ * @brief  姿态更新核心 (每次陀螺仪数据到达时调用)
+ *
+ *  算法流程:
+ *     1. 计算 dt (带超限保护, 上限 20ms)
+ *     2. 读取陀螺仪原始值并减去零偏
+ *     3. 静态检测 + 零偏校准 (首次 800 帧静态积攒 + 运行期递推跟踪)
+ *     4. 四元数陀螺仪积分 (一阶龙格-库塔)
+ *     5. 加速度计补偿: 由加速度计计算滚转/俯仰参考, 经 SLERP 加权融合
+ *     6. 归一化后刷新姿态缓存
+ *
+ *  初始校准阶段:
+ *    - 偏置累积达到 BMI088_BIAS_CALIB_SAMPLES 帧后,
+ *      取均值作为零偏, 同时用加速度计初始化姿态
+ *    - 校准完成前不输出融合姿态
+ */
 static void BMI088_update_attitude(uint32_t timestamp_us)
 {
     float dt = 0.001f;
@@ -1161,6 +1253,13 @@ static void BMI088_quat_normalize(float quat[4])
     quat[3] /= norm;
 }
 
+/**
+ * @brief  四元数陀螺仪积分 (一阶龙格-库塔)
+ *
+ *  q_new = q ⊗ dq
+ *  其中 dq = [cos(θ/2), (ωx/|ω|)·sin(θ/2), (ωy/|ω|)·sin(θ/2), (ωz/|ω|)·sin(θ/2)]
+ *  θ = |ω| · dt
+ */
 static void BMI088_quat_integrate(float quat[4], const float gyro[3], float dt)
 {
     float omega_norm = BMI088_vector_norm3(gyro);
@@ -1197,6 +1296,14 @@ static void BMI088_quat_from_accel(float quat[4], const float accel[3])
     BMI088_quat_from_euler(quat, roll, pitch, 0.0f);
 }
 
+/**
+ * @brief  由加速度计计算滚转和俯仰角 (忽略偏航)
+ *
+ *  roll  = atan2(Ay, Az)
+ *  pitch = atan2(-Ax, sqrt(Ay² + Az²))
+ *
+ *  输入先归一化, 输出单位为弧度
+ */
 static void BMI088_roll_pitch_from_accel(const float accel[3], float *roll, float *pitch)
 {
     float ax = accel[0];
@@ -1249,6 +1356,15 @@ static void BMI088_quat_from_euler(float quat[4], float roll, float pitch, float
     BMI088_quat_normalize(quat);
 }
 
+/**
+ * @brief  SLERP 球面线性插值: 从 from 四元数插值到 to 四元数
+ *
+ *  q = [sin((1-t)θ) / sinθ] · from + [sin(tθ) / sinθ] · to
+ *  cosθ = dot(from, to)
+ *
+ *  当 dot > 0.9995 时退化为线性插值 (避免小角除零)
+ *  当 dot < 0 时取负 to 取短路径
+ */
 static void BMI088_quat_slerp(float out[4], const float from[4], const float to[4], float t)
 {
     float q_to[4] = {to[0], to[1], to[2], to[3]};
@@ -1360,6 +1476,17 @@ static float BMI088_vector_norm3(const float vec[3])
     return sqrtf((vec[0] * vec[0]) + (vec[1] * vec[1]) + (vec[2] * vec[2]));
 }
 
+/**
+ * @brief  静态检测 & 运行期零偏跟踪
+ *
+ *  静态判定条件:
+ *    - 陀螺仪模值 < BMI088_STATIC_GYRO_NORM_THRESHOLD (0.08 deg/s)
+ *    - 加速度计模值与标准重力偏差 < BMI088_STATIC_ACCEL_NORM_THRESHOLD (1.0 m/s^2)
+ *
+ *  跟踪方式:
+ *    校准完成后, 在静态期间对陀螺仪零偏进行一阶低通更新:
+ *      bias[n] += alpha * (meas[n] - bias[n])    其中 alpha = 0.0025
+ */
 static void BMI088_update_static_and_bias(const float gyro_meas[3], const float accel[3])
 {
     float gyro_norm = BMI088_vector_norm3(gyro_meas);
