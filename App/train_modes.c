@@ -2,15 +2,73 @@
  * @file    train_modes.c
  * @brief   语音驱动的训练模式状态机
  *
- *          流程：
- *          SYS_IDLE_VOICE → 轮询 Voice_GetCommand()
- *          → 语音命令匹配 → 播报模式名 → CALIBRATE → TRAIN → FEEDBACK → IDLE
+ *  ===== 系统架构 =====
  *
- *          安全暂停：训练中检测到姿态异常 → SYS_PAUSE（激光灭、舵机回中）
- *          → 姿态连续正常 3 秒 → 自动恢复训练
+ *  启动入口:
+ *    App_Init() → SYS_MODE_SELECT (按键选择 FULL / CUSTOM 模式)
  *
- *          患者反馈：PA2 按键（短按），用于扫视/忽略训练中确认目标
+ *  模式选择:
+ *    SYS_MODE_SELECT
+ *      └─ PA2 单击 → 等待再次单击
+ *           ├─ 600ms 内再次单击 → APP_FLOW_CUSTOM (自定义模式: 语音选单个模式)
+ *           └─ 600ms 超时       → APP_FLOW_FULL   (完整模式: A→B→C→D→E 自动循环)
+ *      └─ SYS_MODE_ENTER_PROMPT (播报模式类型, 2.5s 后进入下一状态)
+ *           ├─ FULL模式   → SYS_CALIBRATE (从 MODE_A 开始)
+ *           └─ CUSTOM模式 → SYS_IDLE_VOICE (等待语音命令选择具体模式)
+ *
+ *  全模式循环 (FULL FLOW):
+ *    每轮: SYS_CALIBRATE → SYS_TRAIN_PROMPT → SYS_TRAIN → SYS_FEEDBACK
+ *          → SYS_NEXT_CONFIRM (PA2 确认后进入下一模式) → 回到 SYS_CALIBRATE
+ *    完成全部 5 个模式后播报"全部完成", 回到 SYS_MODE_SELECT
+ *
+ *  自定义模式 (CUSTOM FLOW):
+ *    完成一个模式: SYS_FEEDBACK → SYS_IDLE_VOICE (等待下一条语音命令)
+ *
+ *  所有语音命令在 App_Run() 中全局统一处理 (先于状态分发),
+ *  支持跨状态的命令: 暂停/恢复/重做/跳过/模式切换
+ *
+ *  ===== 暂停/恢复系统 =====
+ *
+ *  触发条件:
+ *    1. 姿态超限 (roll>20°/pitch>20°/yaw>30°) → 自动暂停
+ *    2. 语音命令"暂停训练" → 主动暂停
+ *
+ *  恢复方式:
+ *    - 姿态暂停: 姿态连续正常 3s 后自动恢复
+ *    - 语音暂停: 语音命令"继续训练"恢复
+ *    - 暂停时保存舵机角度/激光/LED状态, 恢复时还原
+ *
+ *  时间补偿:
+ *    暂停期间所有时间戳 (timebase, start_tick, trial_tick 等) 按暂停时长
+ *    偏移, 确保暂停不影响训练计时和反应时间计算的准确性
+ *
+ *  ===== 语音命令路由 =====
+ *
+ *  唤醒词区 (TYPE=0x01~0x0F, VOICE_CMD_IS_WAKE):
+ *    "你好小盈"          → 进入静音监听窗口, 准备接收后续命令
+ *    "暂停训练"          → 暂停训练 (任何状态)
+ *    "继续训练"          → 从暂停中恢复 (仅暂停状态)
+ *    "重新开始"          → 重新开始当前模式
+ *    "跳过"              → 跳到下一个模式
+ *    "模式切换"          → 回到模式选择界面
+ *
+ *  标准命令词 (TYPE=0x00):
+ *    "注视训练"...       → 直接切换到对应模式 + 校准
+ *    "标定模式"          → 进入舵机视野标定
+ *    "重新开始" / "跳过" → 同唤醒词区
+ *
+ *  ===== 安全保护 =====
+ *
+ *  - 训练启动后前 500ms 不检测姿态异常 (安全宽限期)
+ *  - 检测到姿态超限 → App_EnterPause(1) → 语音提示 + 蜂鸣器报警
+ *    → 保存当前状态 → 激光灭 / LED灭 / 舵机回中
+ *    模式 A(注视) 不触发安全检测 (患者需自由点头)
+ *
+ *  ===== 患者反馈 =====
+ *
+ *  PA2 按键(短按), 用于扫视/追踪/忽略训练中确认目标
  */
+
 #include "train_modes.h"
 #include "servo.h"
 #include "voice.h"
@@ -21,6 +79,10 @@
 #include "buzzer.h"
 #include <string.h>
 
+/*===========================================================================
+ *  命令守卫超时 (ms):
+ *    校准状态下屏蔽相同命令的连续误触发
+ *===========================================================================*/
 #define APP_CALIB_CMD_GUARD_MS       1200U
 #define APP_TRAIN_SAFETY_GRACE_MS     500U
 #define APP_VOICE_LISTEN_WINDOW_MS   5000U
@@ -28,6 +90,9 @@
 #define APP_TRAIN_START_PROMPT_MS    4000U
 #define APP_MODE_ENTER_PROMPT_MS     2500U
 
+/*===========================================================================
+ *  应用层事件类型 (用于调试和分析)
+ *===========================================================================*/
 typedef enum {
     APP_EVENT_NONE = 0,
     APP_EVENT_ENTER_CALIB = 1,
@@ -45,6 +110,11 @@ typedef enum {
     APP_EVENT_NEXT_CONFIRM = 13,
 } AppEvent_t;
 
+/*===========================================================================
+ *  流程模式
+ *    FULL  : 从 A 到 E 自动循环, 模式间需 PA2 确认
+ *    CUSTOM: 语音自由选择单个模式, 完成后回到 IDLE
+ *===========================================================================*/
 typedef enum {
     APP_FLOW_FULL = 0,
     APP_FLOW_CUSTOM = 1,
@@ -101,7 +171,14 @@ static uint32_t neglect_trial_tick  = 0;
 static uint8_t  neglect_responded   = 0;
 static uint8_t  neglect_trial_count = 0;
 
-/* ===== 安全暂停/恢复变量 ===== */
+/*===========================================================================
+ *  安全暂停/恢复变量
+ *    pause_resume_xxx: 暂停前保存的舵机/激光/LED 状态, 恢复时还原
+ *    pause_by_voice  : 语音暂停 (需语音恢复, 不自动恢复)
+ *    pause_stable_tick: 姿态恢复后连续稳定计时
+ *    paused_ms_last  : 上一次暂停持续时间 (用于诊断)
+ *    voice_listen_xxx: 语音监听窗口 (唤醒词后等待命令)
+ *===========================================================================*/
 static uint32_t pause_stable_tick   = 0;
 static uint8_t  pause_voice_played  = 0;
 static uint32_t pause_enter_tick    = 0;
@@ -114,7 +191,9 @@ static uint8_t  pause_by_voice      = 0;
 static uint8_t  voice_listen_active = 0;
 static uint32_t voice_listen_start_tick = 0;
 
-/* ===== 运行诊断变量 ===== */
+/*===========================================================================
+ *  运行诊断 & 模式控制变量
+ *===========================================================================*/
 static uint8_t  last_voice_cmd      = 0;
 static uint32_t last_voice_cmd_tick = 0;
 static uint8_t  last_app_event      = APP_EVENT_NONE;
@@ -138,13 +217,18 @@ static uint8_t  app_servo_y = 90;
 static uint8_t  app_laser_on = 0;
 static uint8_t  app_led_focus_on = 0;
 
-/* 舵机角度标定参数（由 Calibrate_ServoRange 测量后填入） */
-/* X轴：第12步(80°)~第18步(110°)为训练范围 */
-/* Y轴：舒适区约105~110°，取100~115° */
-uint8_t CALIB_X_MIN = 80;    /* X轴训练范围左边界（患者右侧视野） */
-uint8_t CALIB_X_MAX = 110;   /* X轴训练范围右边界（患者左侧视野） */
-uint8_t CALIB_Y_MIN = 100;   /* Y轴训练范围底边 */
-uint8_t CALIB_Y_MAX = 115;   /* Y轴训练范围顶边 */
+/*===========================================================================
+ *  舵机角度标定参数
+ *    由语音命令"标定模式"触发的 Calibrate_ServoRange() 测量后填入
+ *    X轴: 患者左右视野边界 (第12步=80° ~ 第18步=110°)
+ *    Y轴: 舒适区约105~110° (取100~115°)
+ *
+ *    各训练模式使用此值作为激光投射范围, 确保光点落在患者视野内
+ *===========================================================================*/
+uint8_t CALIB_X_MIN = 80;
+uint8_t CALIB_X_MAX = 110;
+uint8_t CALIB_Y_MIN = 100;
+uint8_t CALIB_Y_MAX = 115;
 
 /* 语音播报冷却计时 */
 static uint32_t voice_cooldown = 0;
@@ -232,7 +316,13 @@ static void State_CalibServo(void);
 void Calibrate_ServoRange(void);
 
 /**
- * @brief  初始化应用层
+ * @brief  恢复训练: 还原暂停前的舵机/激光/LED 状态, 补偿暂停时间
+ *
+ *  暂停时间补偿:
+ *    暂停期间所有训练计时器 (timebase, start_tick, trial_start_tick,
+ *    saccade_light_on_tick, pursuit_state_tick, focus_phase_tick,
+ *    neglect_trial_tick) 均偏移 paused_ms, 确保暂停不影响
+ *    训练时长和反应时间的测量准确性
  */
 void App_Init(void)
 {
@@ -271,7 +361,13 @@ void App_Init(void)
 
 /**
  * @brief  应用主运行函数（每 10ms 主循环调用）
- *         全局处理语音命令 + 状态分发
+ *         执行流程:
+ *           1. 读取语音命令并缓存
+ *           2. 模式切换命令 → SYS_MODE_SELECT (跨所有状态)
+ *           3. 全局唤醒词命令处理 (暂停/恢复/重做/跳过/模式切换)
+ *           4. 全局标准命令处理 (重新开始/暂停/跳过/标定模式/训练模式)
+ *           5. 语音监听超时检查
+ *           6. 状态机分发
  */
 void App_Run(bmi088_euler_data_t *euler, float temp)
 {
@@ -575,7 +671,9 @@ static void App_State_ModeEnterPrompt(void)
 }
 
 /**
- * @brief  校准状态
+ * @brief  SmoothStep 插值函数: 在 [0,1] 区间提供平滑加速/减速曲线
+ *         s(t) = t² · (3 - 2t)
+ *         用于追踪训练中舵机的平滑移动, 避免速度突变
  */
 static void App_State_Calibrate(void)
 {
@@ -623,7 +721,22 @@ static void App_State_TrainPrompt(void)
 }
 
 /**
- * @brief  训练状态：分发到对应模式
+ * @brief  反馈状态: 播报训练结果 + 决定下一步状态
+ *
+ *  评分逻辑:
+ *    A(注视): avg_head_stability < 3.0 → 出色,
+ *             < 5.0 → 一般, ≥ 5.0 → 保持头部稳定
+ *    B(扫视): 正确率 ≥ 80% + 平均反应时间 < 1.5s → 速度快,
+ *             正确率 ≥ 80% → 很棒,
+ *             正确率 ≥ 50% → 不错, < 50% → 再试试
+ *    C(追踪): 正确率 < 50% → 再试试,
+ *             代偿计数 > 20 → 请用眼睛追踪,
+ *             否则 → 做得好
+ *
+ *  下一步:
+ *    FULL模式 + 已完成所有模式 → 播报"全部完成" → SYS_MODE_SELECT
+ *    FULL模式 + 还有未完成模式 → SYS_NEXT_CONFIRM
+ *    CUSTOM模式               → SYS_IDLE_VOICE
  */
 static void App_State_Train(void)
 {
@@ -639,7 +752,11 @@ static void App_State_Train(void)
 }
 
 /**
- * @brief  反馈状态：播报结果 → 回到 IDLE
+ * @brief  设置追踪训练的目标关键点 (共 8 个点)
+ *         点位置映射:
+ *           0: 左     1: 右     2: 上     3: 下
+ *           4: 左上   5: 右下   6: 右上   7: 左下
+ *         坐标由 CALIB_X/Y_MIN/MAX 标定值决定
  */
 static void App_State_Feedback(void)
 {
@@ -745,7 +862,16 @@ static void App_State_NextConfirm(void)
 }
 
 /**
- * @brief  暂停状态：姿态异常时自动触发，姿态正常 3 秒后恢复
+ * @brief  暂停状态
+ *
+ *  两种暂停模式:
+ *    1. 姿态暂停 (pause_by_voice=0):
+ *       播报"保持头部稳定" + 蜂鸣器 → 激光灭/舵机回中
+ *       姿态连续正常 3s 后自动恢复 App_ResumeFromPause
+ *
+ *    2. 语音暂停 (pause_by_voice=1):
+ *       不播报额外语音, 不自动恢复
+ *       等待"继续训练"命令 (在 App_Run 全局命令中处理)
  */
 static void App_State_Pause(void)
 {
@@ -790,7 +916,17 @@ static void App_State_Pause(void)
 }
 
 /**
- * @brief  安全检查：训练中检测姿态异常 → 暂停
+ * @brief  安全检查: 训练中检测姿态异常 → 暂停
+ *
+ *  安全宽限期 (APP_TRAIN_SAFETY_GRACE_MS = 500ms):
+ *    训练启动后前 500ms 不触发暂停, 防止校准完成瞬间的抖动误触发
+ *
+ *  模式 A (注视) 不触发安全检查 (患者需要自由点头姿态)
+ *
+ *  触发条件 (USB 朝上安装的轴系语义):
+ *    - roll  (点头) > 20°
+ *    - pitch (转头) > 20°
+ *    - yaw   (侧倾) > 30°
  */
 static void App_SafetyCheck(void)
 {
@@ -1178,7 +1314,17 @@ static void Pursuit_AdvancePoint(uint32_t now)
 }
 
 /**
- * @brief  状态切换
+ * @brief  E — 空间忽略训练 (左右交替, 6 轮)
+ *
+ *  机制:
+ *    - neglect_trial_count 奇偶决定左右: 0=左, 1=右, 2=左...
+ *    - 每轮: 舵机移到对应侧 → 播报提示(L/R) → 等待 2s → 开启激光
+ *    - 患者看到激光按 PA2 确认 → 记录反应时间
+ *    - 5s 超时: 播报忽略提示
+ *    - 6 轮后完成
+ *
+ *  左右位置由 CALIB_X_MIN/MAX 标定值决定:
+ *    左 = X_MIN, 右 = X_MAX
  */
 static void App_Transition(SystemState_t next_state)
 {
@@ -1256,8 +1402,12 @@ static void App_Transition(SystemState_t next_state)
 }
 
 /**
- * @brief  A — 注视稳定性训练
- *         激光固定点，患者注视 15 秒，检测头稳指标
+ * @brief  A — 注视稳定性训练 (15 秒)
+ *
+ *  机制:
+ *    - 激光常亮, LED_FOCUS 亮
+ *    - 头部稳定度监测: head_stability > 5.0 时每 3s 语音提示"保持头部稳定"
+ *    - 15 秒后结束, 记录 avg_head_stability 到 feedback 评价
  */
 static void Train_Fixation(void)
 {
@@ -1290,9 +1440,13 @@ static void Train_Fixation(void)
 }
 
 /**
- * @brief  B — 扫视训练
- *         激光 4 位置随机跳变 × 8 次
- *         患者看到激光按 PA2 确认 → 记录反应时间
+ * @brief  暂停时间补偿: 将所有训练计时器偏移 paused_ms
+ *         timebase 和 record.start_tick 为基础计时器,
+ *         其余变量取决于当前运行的训练模式 (通过 !=0 判断是否激活)
+ *
+ *         不补偿的部分:
+ *          - voice_cooldown (语音冷却不受暂停影响)
+ *          - pause_stable_tick (恢复后重新开始计数)
  */
 static void Train_Saccade(void)
 {
@@ -1382,8 +1536,21 @@ static void Train_Saccade(void)
 }
 
 /**
- * @brief  C — 平稳追踪训练
- *         激光平滑移动到关键点，到点后等待 PA2 确认
+ * @brief  C — 平稳追踪训练 (8 关键点 SmoothStep 插值)
+ *
+ *  机制:
+ *    - 预定义 8 个空间关键点 (由 Pursuit_SetTarget 设置)
+ *    - 每点分两阶段:
+ *      PURSUIT_MOVE (2s):   舵机从当前位置 SmoothStep 插值到目标点
+ *      PURSUIT_CHECKPOINT (2s): 到达目标点, 等待 PA2 确认或 2s 超时
+ *    - PA2: 记录反应时间, 进入下一个点
+ *    - 超时: 播报"超时", 进入下一个点
+ *    - 训练全程监测 is_compensatory (代偿转头), 超过阈值在反馈中提示
+ *    - 完成 8 个点后结束
+ *
+ *  位置映射:
+ *    0:左  1:右  2:上  3:下
+ *    4:左上  5:右下  6:右上  7:左下
  */
 static void Train_Pursuit(void)
 {
@@ -1444,8 +1611,18 @@ static void Train_Pursuit(void)
 }
 
 /**
- * @brief  D — 视觉聚焦训练
- *         近距 LED / 远距激光交替 5s × 5 轮
+ * @brief  B — 扫视训练 (4 位置 × 8 次随机)
+ *
+ *  机制:
+ *    - Fisher-Yates 洗牌生成 8 次随机序列 (0/1/2/3 各出现 2 次)
+ *    - 每次: 舵机跳转到目标位置 → 开启激光 → 等待 PA2 或 3s 超时
+ *    - PA2: 记录反应时间, 语音鼓励, saccade_streak 累计连击
+ *    - 连续 3 次正确 → 播报"连续正确"并清零 streak
+ *    - 超时: 播报"超时", streak 清零
+ *
+ *  位置由 CALIB_X/Y_MIN/MAX 标定值决定:
+ *    0 = (MIN, MIN)  1 = (MAX, MIN)
+ *    2 = (MIN, MAX)  3 = (MAX, MAX)
  */
 static void Train_Focus(void)
 {
@@ -1471,8 +1648,14 @@ static void Train_Focus(void)
 }
 
 /**
- * @brief  E — 空间忽略训练
- *         左右视野交替点亮激光，患者按 PA2 确认
+ * @brief  D — 视觉聚焦训练 (近LED/远激光 5s × 5 轮 = 10 相)
+ *
+ *  机制:
+ *    - 10 个相位 (focus_phase 0~9)
+ *    - 偶相位: LED_FOCUS 亮 (近距, 患者注视 LED)
+ *    - 奇相位: 激光亮 (远距, 患者注视墙面激光点)
+ *    - 每相持续 5 秒
+ *    - 10 相完成后结束
  */
 static void Train_Neglect(void)
 {
@@ -1531,14 +1714,25 @@ static void Train_Neglect(void)
 }
 
 /**
- * @brief  标定模式 — 按键标记视野边界
- *         语音命令「标定模式」触发，先标X轴（从70°向右扫描→按PA2标记边界）
- *         再标Y轴（向上扫描→按PA2标记边界），最后回到IDLE_VOICE
+ * @brief  舵机视野标定 — 按键标记患者视野边界
  *
- *         标定结果直接修改 CALIB_X/Y_MIN/MAX，训练模式自动使用新值。
- *         不重启则不丢，重启后还原为代码默认值。
+ *  触发: 语音命令"标定模式" (在 SYS_IDLE_VOICE 状态下)
  *
- *  相序:  0=开始语音 → 1=X右边界 → 2=X左边界 → 3=Y底边 → 4=Y顶边 → 5=完成
+ *  相序 (calib_phase):
+ *    0 = 准备: 蜂鸣器 ×2, 激光亮, 舵机归位(70°/90°)
+ *    1 = X 轴向右扫描: 70°→150°, 每 100ms 步进 1°, PA2 标记右边界
+ *    2 = X 轴向左扫描: 150°→70°,  PA2 标记左边界
+ *    3 = Y 轴向上扫描: 80°→140°,  PA2 标记上边界
+ *    4 = Y 轴向下扫描: 140°→80°,  PA2 标记下边界
+ *    5 = 完成: 保存到 CALIB_X/Y_MIN/MAX, 激光灭, 播报"初始化完成"
+ *
+ *  结果:
+ *    CALIB_X_MIN = min(第一次标记, 第二次标记)
+ *    CALIB_X_MAX = max(第一次标记, 第二次标记)
+ *    Y 轴同理
+ *    未按键时使用默认值 (X=110, Y=100~115)
+ *
+ *  保存的标定值在 MCU 重启后恢复代码默认值, 每次开机需重新标定
  */
 static void State_CalibServo(void)
 {
