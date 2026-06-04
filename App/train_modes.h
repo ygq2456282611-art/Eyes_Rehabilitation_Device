@@ -33,6 +33,7 @@ typedef enum {
     SYS_TRAIN_PROMPT=7,  /* 训练开始提示：播报后再进入训练 */
     SYS_NEXT_CONFIRM=8,  /* 完整模式：等待PA2确认进入下一项 */
     SYS_MODE_ENTER_PROMPT=9, /* 模式进入提示：播报后再进入对应流程 */
+    SYS_MODE_CMD_ACK_WAIT=10, /* voice command ack wait */
 } SystemState_t;
 
 typedef struct {

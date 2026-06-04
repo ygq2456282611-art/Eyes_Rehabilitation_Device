@@ -27,6 +27,7 @@
 #define APP_MODE_DOUBLE_CLICK_MS      600U
 #define APP_TRAIN_START_PROMPT_MS    4000U
 #define APP_MODE_ENTER_PROMPT_MS     2500U
+#define APP_MODE_CMD_ACK_WAIT_MS     1800U
 
 typedef enum {
     APP_EVENT_NONE = 0,
@@ -43,6 +44,7 @@ typedef enum {
     APP_EVENT_CMD_IGNORED = 11,
     APP_EVENT_MODE_SELECT = 12,
     APP_EVENT_NEXT_CONFIRM = 13,
+    APP_EVENT_MODE_CMD_ACK_WAIT = 14,
 } AppEvent_t;
 
 typedef enum {
@@ -131,6 +133,7 @@ static uint8_t  next_confirm_advance = 1;
 static AppFlowMode_t pending_flow_mode = APP_FLOW_CUSTOM;
 static uint8_t  mode_enter_prompted = 0;
 static uint32_t mode_enter_prompt_tick = 0;
+static uint32_t mode_cmd_ack_tick = 0;
 
 /* ===== 应用层记录的舵机目标角度 ===== */
 static uint8_t  app_servo_x = 90;
@@ -183,6 +186,7 @@ static const uint8_t mode_start_tts_id[MODE_COUNT] = {
 /* 内部函数 */
 static void App_State_ModeSelect(void);
 static void App_State_ModeEnterPrompt(void);
+static void App_State_ModeCmdAckWait(void);
 static void App_State_Calibrate(void);
 static void App_State_TrainPrompt(void);
 static void App_State_Train(void);
@@ -263,6 +267,7 @@ void App_Init(void)
     pending_flow_mode = APP_FLOW_CUSTOM;
     mode_enter_prompted = 0;
     mode_enter_prompt_tick = 0;
+    mode_cmd_ack_tick = 0;
     app_servo_x = 90;
     app_servo_y = 90;
     app_laser_on = 0;
@@ -449,6 +454,7 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
         case SYS_IDLE_VOICE: break;
         case SYS_MODE_SELECT: App_State_ModeSelect(); break;
         case SYS_MODE_ENTER_PROMPT: App_State_ModeEnterPrompt(); break;
+        case SYS_MODE_CMD_ACK_WAIT: App_State_ModeCmdAckWait(); break;
         case SYS_CALIBRATE:  App_State_Calibrate(); break;
         case SYS_TRAIN_PROMPT: App_State_TrainPrompt(); break;
         case SYS_TRAIN:
@@ -499,8 +505,8 @@ static void App_State_IdleVoice(void)
     }
 
     /* 播报确认：命令词本身已经触发模块播报，MCU 加一个小停顿 */
-    HAL_Delay(600);
-    App_Transition(SYS_CALIBRATE);
+    mode_cmd_ack_tick = HAL_GetTick();
+    App_Transition(SYS_MODE_CMD_ACK_WAIT);
 }
 
 static void App_State_ModeSelect(void)
@@ -574,6 +580,19 @@ static void App_State_ModeEnterPrompt(void)
     }
 }
 
+static void App_State_ModeCmdAckWait(void)
+{
+    uint32_t now = HAL_GetTick();
+
+    if (mode_cmd_ack_tick == 0U)
+        mode_cmd_ack_tick = now;
+
+    if ((now - mode_cmd_ack_tick) >= APP_MODE_CMD_ACK_WAIT_MS)
+    {
+        mode_cmd_ack_tick = 0;
+        App_Transition(SYS_CALIBRATE);
+    }
+}
 /**
  * @brief  校准状态
  */
@@ -1087,8 +1106,8 @@ static void App_SelectModeAndCalibrate(TrainMode_t mode)
     pause_enter_tick = 0;
     pause_by_voice = 0;
     voice_listen_active = 0;
-    HAL_Delay(600);
-    App_Transition(SYS_CALIBRATE);
+    mode_cmd_ack_tick = HAL_GetTick();
+    App_Transition(SYS_MODE_CMD_ACK_WAIT);
 }
 
 static uint8_t App_IsPauseCmd(uint8_t cmd)
@@ -1246,6 +1265,13 @@ static void App_Transition(SystemState_t next_state)
     {
         mode_enter_prompted = 0;
         mode_enter_prompt_tick = 0;
+        mode_cmd_ack_tick = 0;
+    }
+
+    if (next_state == SYS_MODE_CMD_ACK_WAIT)
+    {
+        App_SetEvent(APP_EVENT_MODE_CMD_ACK_WAIT);
+        mode_cmd_ack_tick = HAL_GetTick();
     }
 
     if (next_state == SYS_NEXT_CONFIRM)
@@ -1485,7 +1511,7 @@ static void Train_Neglect(void)
         App_SetServoAngle(SERVO_AXIS_X, neglect_side ? CALIB_X_MAX : CALIB_X_MIN);
         HAL_Delay(300);
         App_LaserOn();
-        Voice_Play(0xFF, neglect_side ? VOICE_TTS_RIGHT_SIDE : VOICE_TTS_LEFT_SIDE);
+        Voice_Play(0xFF, neglect_side ? VOICE_TTS_LEFT_SIDE : VOICE_TTS_RIGHT_SIDE);
         voice_cooldown = HAL_GetTick();
         HAL_Delay(2000);
         neglect_trial_tick = now;
