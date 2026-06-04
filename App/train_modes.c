@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    train_modes.c
  * @brief   语音驱动的训练模式状态机
  *
@@ -45,6 +45,8 @@ typedef enum {
     APP_EVENT_MODE_SELECT = 12,
     APP_EVENT_NEXT_CONFIRM = 13,
     APP_EVENT_MODE_CMD_ACK_WAIT = 14,
+    APP_EVENT_ENTER_SERVO_CALIB = 15,
+    APP_EVENT_SERVO_CALIB_DONE = 16,
 } AppEvent_t;
 
 typedef enum {
@@ -134,6 +136,9 @@ static AppFlowMode_t pending_flow_mode = APP_FLOW_CUSTOM;
 static uint8_t  mode_enter_prompted = 0;
 static uint32_t mode_enter_prompt_tick = 0;
 static uint32_t mode_cmd_ack_tick = 0;
+static uint8_t  servo_range_calibrated = 0;
+static uint8_t  servo_calib_prompted = 0;
+static uint8_t  servo_calib_after_mode_enter = 0;
 
 /* ===== 应用层记录的舵机目标角度 ===== */
 static uint8_t  app_servo_x = 90;
@@ -165,6 +170,11 @@ static uint32_t calib_tick     = 0;   /* 步进计时 */
 static uint8_t  calib_pressed  = 0;   /* 当前相位内按键次数 */
 static uint8_t  calib_save1    = 0;   /* 第1次按键角度（不区分左右） */
 static uint8_t  calib_save2    = 0;   /* 第2次按键角度 */
+static uint8_t  calib_point_count = 0; /* 本轮有效记录点数，必须满4点 */
+static uint8_t  calib_x_min_pending = 0;
+static uint8_t  calib_x_max_pending = 0;
+static uint8_t  calib_y_min_pending = 0;
+static uint8_t  calib_y_max_pending = 0;
 
 /* ===== 模式名语音 ID 映射 ===== */
 static const uint8_t mode_voice_id[MODE_COUNT] = {
@@ -187,6 +197,7 @@ static const uint8_t mode_start_tts_id[MODE_COUNT] = {
 static void App_State_ModeSelect(void);
 static void App_State_ModeEnterPrompt(void);
 static void App_State_ModeCmdAckWait(void);
+static void App_State_ServoCalibReady(void);
 static void App_State_Calibrate(void);
 static void App_State_TrainPrompt(void);
 static void App_State_Train(void);
@@ -205,6 +216,9 @@ static void App_SafetyCheck(void);
 static void App_SetEvent(AppEvent_t event);
 static uint8_t App_ShouldIgnoreCalibCmd(uint8_t cmd);
 static void App_SetServoAngle(uint8_t axis, uint8_t angle);
+static uint8_t App_GetServoCenterX(void);
+static uint8_t App_GetServoCenterY(void);
+static void App_SetServoCenter(void);
 static void App_LaserOn(void);
 static void App_LaserOff(void);
 static void App_LEDFocusOn(void);
@@ -216,6 +230,7 @@ static void App_ApplyPauseTime(uint32_t paused_ms);
 static void App_EnterVoiceListenPause(void);
 static void App_CheckVoiceListenTimeout(void);
 static void App_EnterModeSelect(void);
+static void App_EnterServoCalibReady(uint8_t after_mode_enter);
 static void App_StartFullMode(void);
 static void App_StartCustomMode(void);
 static void App_RestartCurrentMode(void);
@@ -268,6 +283,14 @@ void App_Init(void)
     mode_enter_prompted = 0;
     mode_enter_prompt_tick = 0;
     mode_cmd_ack_tick = 0;
+    servo_range_calibrated = 0;
+    servo_calib_prompted = 0;
+    servo_calib_after_mode_enter = 0;
+    calib_point_count = 0;
+    calib_x_min_pending = 0;
+    calib_x_max_pending = 0;
+    calib_y_min_pending = 0;
+    calib_y_max_pending = 0;
     app_servo_x = 90;
     app_servo_y = 90;
     app_laser_on = 0;
@@ -387,6 +410,12 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
     /* ===== 命令词处理（TYPE=0x00，训练模式可跨状态切换）===== */
     if (cmd > 0 && !VOICE_CMD_IS_WAKE(cmd))
     {
+        if (cmd == VOICE_CMD_CALIB_MODE)
+        {
+            App_EnterServoCalibReady(0);
+            return;
+        }
+
         if ((sys_state == SYS_IDLE_VOICE || sys_state == SYS_TRAIN ||
              sys_state == SYS_PAUSE || sys_state == SYS_FEEDBACK) &&
             App_IsRestartCmd(cmd))
@@ -421,16 +450,6 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
             return;
         }
 
-        if (sys_state == SYS_IDLE_VOICE)
-        {
-            if (cmd >= VOICE_CMD_CALIB_MODE && cmd <= VOICE_CMD_CALIB_MODE)
-            {
-                calib_phase   = 0;
-                calib_pressed = 0;
-                sys_state = SYS_CALIB_SERVO;
-                return;
-            }
-        }
 
         if ((sys_state == SYS_IDLE_VOICE || sys_state == SYS_TRAIN ||
              sys_state == SYS_PAUSE || sys_state == SYS_FEEDBACK) &&
@@ -455,6 +474,7 @@ void App_Run(bmi088_euler_data_t *euler, float temp)
         case SYS_MODE_SELECT: App_State_ModeSelect(); break;
         case SYS_MODE_ENTER_PROMPT: App_State_ModeEnterPrompt(); break;
         case SYS_MODE_CMD_ACK_WAIT: App_State_ModeCmdAckWait(); break;
+        case SYS_SERVO_CALIB_READY: App_State_ServoCalibReady(); break;
         case SYS_CALIBRATE:  App_State_Calibrate(); break;
         case SYS_TRAIN_PROMPT: App_State_TrainPrompt(); break;
         case SYS_TRAIN:
@@ -570,8 +590,16 @@ static void App_State_ModeEnterPrompt(void)
     completed_modes = 0;
 
     if (flow_mode == APP_FLOW_FULL)
-    {
         train_mode = MODE_A_FIXATION;
+
+    if (!servo_range_calibrated)
+    {
+        App_EnterServoCalibReady(1);
+        return;
+    }
+
+    if (flow_mode == APP_FLOW_FULL)
+    {
         App_Transition(SYS_CALIBRATE);
     }
     else
@@ -596,6 +624,35 @@ static void App_State_ModeCmdAckWait(void)
 /**
  * @brief  校准状态
  */
+static void App_State_ServoCalibReady(void)
+{
+    if (!servo_calib_prompted)
+    {
+        App_StopStimulus();
+        (void)Key_GetEvent(KEY_PATIENT);
+        Voice_Play(0xFF, VOICE_TTS_SERVO_CALIB_START);
+        voice_cooldown = HAL_GetTick();
+        servo_calib_prompted = 1;
+        return;
+    }
+
+    if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT)
+    {
+        servo_calib_prompted = 0;
+        calib_phase = 0;
+        calib_pressed = 0;
+        calib_save1 = 0;
+        calib_save2 = 0;
+        calib_point_count = 0;
+        calib_x_min_pending = 0;
+        calib_x_max_pending = 0;
+        calib_y_min_pending = 0;
+        calib_y_max_pending = 0;
+        App_SetEvent(APP_EVENT_ENTER_SERVO_CALIB);
+        sys_state = SYS_CALIB_SERVO;
+    }
+}
+
 static void App_State_Calibrate(void)
 {
     if (!calib_prompted)
@@ -839,6 +896,22 @@ static void App_SetServoAngle(uint8_t axis, uint8_t angle)
         app_servo_y = angle;
 }
 
+static uint8_t App_GetServoCenterX(void)
+{
+    return (uint8_t)(((uint16_t)CALIB_X_MIN + (uint16_t)CALIB_X_MAX) / 2U);
+}
+
+static uint8_t App_GetServoCenterY(void)
+{
+    return (uint8_t)(((uint16_t)CALIB_Y_MIN + (uint16_t)CALIB_Y_MAX) / 2U);
+}
+
+static void App_SetServoCenter(void)
+{
+    App_SetServoAngle(SERVO_AXIS_X, App_GetServoCenterX());
+    App_SetServoAngle(SERVO_AXIS_Y, App_GetServoCenterY());
+}
+
 static void App_SetEvent(AppEvent_t event)
 {
     last_app_event = (uint8_t)event;
@@ -886,8 +959,7 @@ static void App_StopStimulus(void)
 {
     App_LaserOff();
     App_LEDFocusOff();
-    App_SetServoAngle(SERVO_AXIS_X, 90);
-    App_SetServoAngle(SERVO_AXIS_Y, 90);
+    App_SetServoCenter();
 }
 
 static void App_EnterPause(uint8_t play_posture_voice)
@@ -915,8 +987,7 @@ static void App_EnterPause(uint8_t play_posture_voice)
 
     App_LaserOff();
     App_LEDFocusOff();
-    App_SetServoAngle(SERVO_AXIS_X, 90);
-    App_SetServoAngle(SERVO_AXIS_Y, 90);
+    App_SetServoCenter();
     sys_state = SYS_PAUSE;
 }
 
@@ -1020,6 +1091,32 @@ static void App_EnterModeSelect(void)
     mode_select_first_tick = 0;
     next_confirm_prompted = 0;
     App_Transition(SYS_MODE_SELECT);
+}
+
+static void App_EnterServoCalibReady(uint8_t after_mode_enter)
+{
+    App_StopStimulus();
+    record.completed = 0;
+    pause_stable_tick = 0;
+    pause_voice_played = 0;
+    pause_enter_tick = 0;
+    pause_by_voice = 0;
+    voice_listen_active = 0;
+    next_confirm_prompted = 0;
+    train_prompt_played = 0;
+    mode_cmd_ack_tick = 0;
+    servo_calib_after_mode_enter = after_mode_enter;
+    servo_calib_prompted = 0;
+    calib_phase = 0;
+    calib_pressed = 0;
+    calib_save1 = 0;
+    calib_save2 = 0;
+    calib_point_count = 0;
+    calib_x_min_pending = 0;
+    calib_x_max_pending = 0;
+    calib_y_min_pending = 0;
+    calib_y_max_pending = 0;
+    App_Transition(SYS_SERVO_CALIB_READY);
 }
 
 static void App_StartFullMode(void)
@@ -1149,8 +1246,8 @@ static float SmoothStep(float x)
 
 static void Pursuit_SetTarget(uint8_t idx)
 {
-    uint8_t x_mid = (uint8_t)(((uint16_t)CALIB_X_MIN + (uint16_t)CALIB_X_MAX) / 2U);
-    uint8_t y_mid = (uint8_t)(((uint16_t)CALIB_Y_MIN + (uint16_t)CALIB_Y_MAX) / 2U);
+    uint8_t x_mid = App_GetServoCenterX();
+    uint8_t y_mid = App_GetServoCenterY();
 
     switch (idx)
     {
@@ -1171,8 +1268,8 @@ static void Pursuit_Reset(void)
     pursuit_state = PURSUIT_MOVE;
     pursuit_point_idx = 0;
     pursuit_state_tick = HAL_GetTick();
-    pursuit_start_x = 90;
-    pursuit_start_y = 90;
+    pursuit_start_x = App_GetServoCenterX();
+    pursuit_start_y = App_GetServoCenterY();
     pursuit_comp_count = 0;
     Pursuit_SetTarget(0);
 }
@@ -1272,6 +1369,12 @@ static void App_Transition(SystemState_t next_state)
     {
         App_SetEvent(APP_EVENT_MODE_CMD_ACK_WAIT);
         mode_cmd_ack_tick = HAL_GetTick();
+    }
+
+    if (next_state == SYS_SERVO_CALIB_READY)
+    {
+        App_SetEvent(APP_EVENT_ENTER_SERVO_CALIB);
+        servo_calib_prompted = 0;
     }
 
     if (next_state == SYS_NEXT_CONFIRM)
@@ -1529,7 +1632,7 @@ static void Train_Neglect(void)
         record.correct_trials++;
         record.avg_reaction_ms += (float)reaction;
         App_LaserOff();
-        App_SetServoAngle(SERVO_AXIS_X, 90);
+        App_SetServoAngle(SERVO_AXIS_X, App_GetServoCenterX());
         Voice_Play(0xFF, VOICE_TTS_FOUND_SIDE);
         voice_cooldown = HAL_GetTick();
         neglect_trial_tick = 0;
@@ -1542,7 +1645,7 @@ static void Train_Neglect(void)
         Voice_Play(0xFF, VOICE_TTS_NEGLECT_HINT);
         voice_cooldown = HAL_GetTick();
         App_LaserOff();
-        App_SetServoAngle(SERVO_AXIS_X, 90);
+        App_SetServoAngle(SERVO_AXIS_X, App_GetServoCenterX());
         neglect_trial_tick = 0;
         HAL_Delay(1000);
         return;
@@ -1568,20 +1671,28 @@ static void Train_Neglect(void)
  */
 static void State_CalibServo(void)
 {
-    uint8_t v;
+    uint8_t min_val;
+    uint8_t max_val;
 
     switch (calib_phase)
     {
         case 0:
             Buzzer_Alert(2, 150, 100);
-            Laser_On();
-            Servo_SetAngle(SERVO_AXIS_Y, 90);
-            Servo_SetAngle(SERVO_AXIS_X, 70);
+            App_LaserOn();
+            App_SetServoAngle(SERVO_AXIS_Y, App_GetServoCenterY());
+            App_SetServoAngle(SERVO_AXIS_X, 70);
+            Voice_Play(0xFF, VOICE_TTS_CALIB_PRESS_POINT);
+            voice_cooldown = HAL_GetTick();
             HAL_Delay(2000);
             calib_angle   = 70;
             calib_pressed = 0;
             calib_save1   = 0;
             calib_save2   = 0;
+            calib_point_count = 0;
+            calib_x_min_pending = 0;
+            calib_x_max_pending = 0;
+            calib_y_min_pending = 0;
+            calib_y_max_pending = 0;
             calib_tick    = HAL_GetTick();
             calib_phase   = 1;
             break;
@@ -1591,20 +1702,24 @@ static void State_CalibServo(void)
             if (HAL_GetTick() - calib_tick < 100) return;
             calib_tick = HAL_GetTick();
             if (calib_angle < 150) calib_angle++;
-            Servo_SetAngle(SERVO_AXIS_X, calib_angle);
+            App_SetServoAngle(SERVO_AXIS_X, calib_angle);
 
             if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT && calib_pressed == 0)
             {
                 calib_save1   = calib_angle;
                 calib_pressed = 1;
+                calib_point_count++;
                 Buzzer_Alert(1, 100, 0);
             }
             if (calib_angle >= 150)
             {
-                if (calib_pressed == 0) calib_save1 = 110;
                 calib_phase   = 2;
                 calib_angle   = 150;
                 calib_pressed = 0;
+                Voice_Play(0xFF, VOICE_TTS_CALIB_PRESS_AGAIN);
+                voice_cooldown = HAL_GetTick();
+                HAL_Delay(1200);
+                calib_tick = HAL_GetTick();
             }
             break;
 
@@ -1612,30 +1727,40 @@ static void State_CalibServo(void)
             if (HAL_GetTick() - calib_tick < 100) return;
             calib_tick = HAL_GetTick();
             if (calib_angle > 70) calib_angle--;
-            Servo_SetAngle(SERVO_AXIS_X, calib_angle);
+            App_SetServoAngle(SERVO_AXIS_X, calib_angle);
 
             if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT && calib_pressed == 0)
             {
                 calib_save2   = calib_angle;
                 calib_pressed = 1;
+                calib_point_count++;
                 Buzzer_Alert(1, 100, 0);
             }
             if (calib_angle <= 70)
             {
-                if (calib_pressed == 0) calib_save2 = 110;
-                v = calib_save1; calib_save1 = (v < calib_save2) ? v : calib_save2;
-                v = calib_save2; calib_save2 = (v > calib_save1) ? v : calib_save1;
-                CALIB_X_MIN = calib_save1;
-                CALIB_X_MAX = calib_save2;
+                if (calib_save1 != 0 && calib_save2 != 0)
+                {
+                    min_val = (calib_save1 < calib_save2) ? calib_save1 : calib_save2;
+                    max_val = (calib_save1 > calib_save2) ? calib_save1 : calib_save2;
+                    calib_x_min_pending = min_val;
+                    calib_x_max_pending = max_val;
+                    App_SetServoAngle(SERVO_AXIS_X, (uint8_t)(((uint16_t)min_val + (uint16_t)max_val) / 2U));
+                }
+                else
+                {
+                    App_SetServoAngle(SERVO_AXIS_X, App_GetServoCenterX());
+                }
 
-                Servo_SetAngle(SERVO_AXIS_X, 90);
                 calib_phase   = 3;
                 calib_angle   = 80;
                 calib_pressed = 0;
                 calib_save1   = 0;
                 calib_save2   = 0;
                 Buzzer_Alert(2, 150, 100);
+                Voice_Play(0xFF, VOICE_TTS_CALIB_PRESS_POINT);
+                voice_cooldown = HAL_GetTick();
                 HAL_Delay(1500);
+                calib_tick = HAL_GetTick();
             }
             break;
 
@@ -1644,20 +1769,24 @@ static void State_CalibServo(void)
             if (HAL_GetTick() - calib_tick < 100) return;
             calib_tick = HAL_GetTick();
             if (calib_angle < 140) calib_angle++;
-            Servo_SetAngle(SERVO_AXIS_Y, calib_angle);
+            App_SetServoAngle(SERVO_AXIS_Y, calib_angle);
 
             if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT && calib_pressed == 0)
             {
                 calib_save1   = calib_angle;
                 calib_pressed = 1;
+                calib_point_count++;
                 Buzzer_Alert(1, 100, 0);
             }
             if (calib_angle >= 140)
             {
-                if (calib_pressed == 0) calib_save1 = 100;
                 calib_phase   = 4;
                 calib_angle   = 140;
                 calib_pressed = 0;
+                Voice_Play(0xFF, VOICE_TTS_CALIB_PRESS_AGAIN);
+                voice_cooldown = HAL_GetTick();
+                HAL_Delay(1200);
+                calib_tick = HAL_GetTick();
             }
             break;
 
@@ -1665,21 +1794,24 @@ static void State_CalibServo(void)
             if (HAL_GetTick() - calib_tick < 100) return;
             calib_tick = HAL_GetTick();
             if (calib_angle > 80) calib_angle--;
-            Servo_SetAngle(SERVO_AXIS_Y, calib_angle);
+            App_SetServoAngle(SERVO_AXIS_Y, calib_angle);
 
             if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT && calib_pressed == 0)
             {
                 calib_save2   = calib_angle;
                 calib_pressed = 1;
+                calib_point_count++;
                 Buzzer_Alert(1, 100, 0);
             }
             if (calib_angle <= 80)
             {
-                if (calib_pressed == 0) calib_save2 = 115;
-                v = calib_save1; calib_save1 = (v < calib_save2) ? v : calib_save2;
-                v = calib_save2; calib_save2 = (v > calib_save1) ? v : calib_save1;
-                CALIB_Y_MIN = calib_save1;
-                CALIB_Y_MAX = calib_save2;
+                if (calib_save1 != 0 && calib_save2 != 0)
+                {
+                    min_val = (calib_save1 < calib_save2) ? calib_save1 : calib_save2;
+                    max_val = (calib_save1 > calib_save2) ? calib_save1 : calib_save2;
+                    calib_y_min_pending = min_val;
+                    calib_y_max_pending = max_val;
+                }
 
                 calib_phase = 5;
             }
@@ -1687,18 +1819,55 @@ static void State_CalibServo(void)
 
         /* ===== 完成 ===== */
         case 5:
-            Laser_Off();
-            Servo_SetAngle(SERVO_AXIS_X, 90);
-            Servo_SetAngle(SERVO_AXIS_Y, 90);
+            if (calib_point_count < 4 ||
+                calib_x_min_pending == 0 || calib_x_max_pending == 0 ||
+                calib_y_min_pending == 0 || calib_y_max_pending == 0)
+            {
+                App_LaserOff();
+                Voice_Play(0xFF, VOICE_TTS_CALIB_POINTS_LOW);
+                voice_cooldown = HAL_GetTick();
+                HAL_Delay(2500);
+                calib_phase   = 0;
+                calib_pressed = 0;
+                calib_save1   = 0;
+                calib_save2   = 0;
+                calib_point_count = 0;
+                calib_x_min_pending = 0;
+                calib_x_max_pending = 0;
+                calib_y_min_pending = 0;
+                calib_y_max_pending = 0;
+                break;
+            }
+
+            CALIB_X_MIN = calib_x_min_pending;
+            CALIB_X_MAX = calib_x_max_pending;
+            CALIB_Y_MIN = calib_y_min_pending;
+            CALIB_Y_MAX = calib_y_max_pending;
+
+            App_LaserOff();
+            App_SetServoCenter();
             Voice_Play(0xFF, VOICE_TTS_INIT_OK);
             HAL_Delay(2500);
             calib_phase   = 0;
             calib_pressed = 0;
-            sys_state = SYS_IDLE_VOICE;
+            calib_point_count = 0;
+            servo_range_calibrated = 1;
+            App_SetEvent(APP_EVENT_SERVO_CALIB_DONE);
+            if (servo_calib_after_mode_enter)
+            {
+                servo_calib_after_mode_enter = 0;
+                if (flow_mode == APP_FLOW_FULL)
+                    App_Transition(SYS_CALIBRATE);
+                else
+                    App_Transition(SYS_IDLE_VOICE);
+            }
+            else
+            {
+                App_EnterModeSelect();
+            }
             break;
     }
 }
-
 /**
  * @brief  舵机角度范围标定（旧版自动扫描）
  *         已废弃，请使用语音命令「标定模式」触发的 State_CalibServo

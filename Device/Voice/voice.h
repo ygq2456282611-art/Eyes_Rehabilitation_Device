@@ -73,6 +73,10 @@
 #define VOICE_TTS_START_NEGLECT 0x2B  /* 空间忽略训练开始提示 */
 #define VOICE_TTS_ENTER_FULL_MODE   0x2C  /* 成功进入完整训练模式 */
 #define VOICE_TTS_ENTER_CUSTOM_MODE 0x2D  /* 成功进入自选模式 */
+#define VOICE_TTS_SERVO_CALIB_START  0x2E  /* servo range calibration prompt */
+#define VOICE_TTS_CALIB_PRESS_POINT  0x2F  /* press key to record calibration point */
+#define VOICE_TTS_CALIB_PRESS_AGAIN  0x30  /* press key again to record other side */
+#define VOICE_TTS_CALIB_POINTS_LOW   0x31  /* calibration points not enough, restart */
 
 /* 函数 */
 void Voice_Init(void);

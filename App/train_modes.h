@@ -34,6 +34,7 @@ typedef enum {
     SYS_NEXT_CONFIRM=8,  /* 完整模式：等待PA2确认进入下一项 */
     SYS_MODE_ENTER_PROMPT=9, /* 模式进入提示：播报后再进入对应流程 */
     SYS_MODE_CMD_ACK_WAIT=10, /* voice command ack wait */
+    SYS_SERVO_CALIB_READY=11, /* wait PA2 before servo range calibration */
 } SystemState_t;
 
 typedef struct {
