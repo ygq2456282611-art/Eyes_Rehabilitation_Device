@@ -38,6 +38,7 @@
 #include "ws2812.h"
 #include "sbus.h"
 #include <stdio.h>
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -92,8 +93,11 @@ static uint8_t sbus_swb_middle;
 static uint8_t sbus_zero_event;
 static uint8_t sbus_zero_event_report;
 static char vofa_buf[384];
+static char vofa_dma_buf[384];
 static uint32_t vofa_last_send_ms;
 static uint32_t vofa_tx_fail_count;
+static uint32_t vofa_tx_drop_count;
+static volatile uint8_t vofa_tx_busy;
 static uint32_t ws2812_alert_tick = 0;
 static uint8_t  ws2812_alert_on = 0;
 static uint8_t  prev_alert_active = 0;
@@ -244,7 +248,6 @@ int main(void)
         if ((HAL_GetTick() - vofa_last_send_ms) >= VOFA_SEND_PERIOD_MS)
         {
             int len;
-            uint32_t vofa_timeout_ms;
 
             vofa_last_send_ms = HAL_GetTick();
             BMI088_GetLatestFloat(vofa_gyro, vofa_accel, &temp, &vofa_timestamp_us);
@@ -258,7 +261,7 @@ int main(void)
             sbus_swb_middle = SBUS_IsSwbMiddle();
 
             len = snprintf(vofa_buf, sizeof(vofa_buf),
-                           "imu:%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%u,%u,%.2f,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
+                           "imu:%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%u,%u,%.2f,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
                            euler_angle.roll, euler_angle.pitch, euler_angle.yaw,
                            vofa_roll_deg, vofa_pitch_deg, vofa_yaw_deg,
                            vofa_gyro[0], vofa_gyro[1], vofa_gyro[2],
@@ -280,20 +283,24 @@ int main(void)
                            (unsigned int)Voice_GetLastTxId(),
                            (unsigned int)Voice_GetLastTxTick(),
                            (unsigned int)App_GetLastEvent(),
-                           (unsigned int)vofa_tx_fail_count);
+                           (unsigned int)vofa_tx_fail_count,
+                           (unsigned int)vofa_tx_drop_count);
 
             if ((len > 0) && (len < (int)sizeof(vofa_buf)))
             {
-                vofa_timeout_ms = (((uint32_t)len * 10U * 1000U) + VOFA_UART_BAUDRATE - 1U) / VOFA_UART_BAUDRATE;
-                vofa_timeout_ms += VOFA_TX_MARGIN_MS;
-
-                if (HAL_UART_Transmit(&huart1, (uint8_t *)vofa_buf, (uint16_t)len, vofa_timeout_ms) != HAL_OK)
+                if (vofa_tx_busy != 0U)
                 {
-                    vofa_tx_fail_count++;
+                    vofa_tx_drop_count++;
                 }
                 else
                 {
-                    sbus_zero_event_report = 0U;
+                    memcpy(vofa_dma_buf, vofa_buf, (size_t)len);
+                    vofa_tx_busy = 1U;
+                    if (HAL_UART_Transmit_DMA(&huart1, (uint8_t *)vofa_dma_buf, (uint16_t)len) != HAL_OK)
+                    {
+                        vofa_tx_busy = 0U;
+                        vofa_tx_fail_count++;
+                    }
                 }
             }
         }
@@ -363,6 +370,20 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+void Vofa_USART1_ErrorNotify(void)
+{
+  vofa_tx_busy = 0U;
+  vofa_tx_fail_count++;
+}
+
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+  if (huart->Instance == USART1)
+  {
+    vofa_tx_busy = 0U;
+    sbus_zero_event_report = 0U;
+  }
+}
 
 /* USER CODE END 4 */
 

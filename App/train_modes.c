@@ -165,7 +165,7 @@ static uint8_t  saccade_streak   = 0;
 
 /* 标定模式状态 */
 static uint8_t  calib_phase    = 0;   /* 0=start 1/2=X轴两次标记 3/4=Y轴两次标记 5=完成 */
-static uint8_t  calib_angle    = 70;  /* 当前扫描角度 */
+static uint8_t  calib_angle    = 30;  /* 当前扫描角度 */
 static uint32_t calib_tick     = 0;   /* 步进计时 */
 static uint8_t  calib_pressed  = 0;   /* 当前相位内按键次数 */
 static uint8_t  calib_save1    = 0;   /* 第1次按键角度（不区分左右） */
@@ -592,11 +592,10 @@ static void App_State_ModeEnterPrompt(void)
     if (flow_mode == APP_FLOW_FULL)
         train_mode = MODE_A_FIXATION;
 
-    if (!servo_range_calibrated)
-    {
-        App_EnterServoCalibReady(1);
-        return;
-    }
+    /*
+     * 进入完整/自选模式后暂不强制执行舵机视野标定。
+     * 训练先使用 CALIB_X/Y_MIN/MAX 默认范围；需要标定时由语音“标定模式”触发。
+     */
 
     if (flow_mode == APP_FLOW_FULL)
     {
@@ -1661,7 +1660,7 @@ static void Train_Neglect(void)
 
 /**
  * @brief  标定模式 — 按键标记视野边界
- *         语音命令「标定模式」触发，先标X轴（从70°向右扫描→按PA2标记边界）
+ *         语音命令「标定模式」触发，先标X轴（从30°向右扫描→按PA2标记边界）
  *         再标Y轴（向上扫描→按PA2标记边界），最后回到IDLE_VOICE
  *
  *         标定结果直接修改 CALIB_X/Y_MIN/MAX，训练模式自动使用新值。
@@ -1680,11 +1679,11 @@ static void State_CalibServo(void)
             Buzzer_Alert(2, 150, 100);
             App_LaserOn();
             App_SetServoAngle(SERVO_AXIS_Y, App_GetServoCenterY());
-            App_SetServoAngle(SERVO_AXIS_X, 70);
+            App_SetServoAngle(SERVO_AXIS_X, 30);
             Voice_Play(0xFF, VOICE_TTS_CALIB_PRESS_POINT);
             voice_cooldown = HAL_GetTick();
             HAL_Delay(2000);
-            calib_angle   = 70;
+            calib_angle   = 30;
             calib_pressed = 0;
             calib_save1   = 0;
             calib_save2   = 0;
@@ -1697,7 +1696,7 @@ static void State_CalibServo(void)
             calib_phase   = 1;
             break;
 
-        /* ===== X轴标定（70°→150°→70°）===== */
+        /* ===== X轴标定（30°→150°→30°）===== */
         case 1:
             if (HAL_GetTick() - calib_tick < 100) return;
             calib_tick = HAL_GetTick();
@@ -1726,7 +1725,7 @@ static void State_CalibServo(void)
         case 2:
             if (HAL_GetTick() - calib_tick < 100) return;
             calib_tick = HAL_GetTick();
-            if (calib_angle > 70) calib_angle--;
+            if (calib_angle > 30) calib_angle--;
             App_SetServoAngle(SERVO_AXIS_X, calib_angle);
 
             if (Key_GetEvent(KEY_PATIENT) == KEY_EVENT_SHORT && calib_pressed == 0)
@@ -1736,7 +1735,7 @@ static void State_CalibServo(void)
                 calib_point_count++;
                 Buzzer_Alert(1, 100, 0);
             }
-            if (calib_angle <= 70)
+            if (calib_angle <= 30)
             {
                 if (calib_save1 != 0 && calib_save2 != 0)
                 {

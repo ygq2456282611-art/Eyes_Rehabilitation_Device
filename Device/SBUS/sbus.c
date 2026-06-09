@@ -4,6 +4,8 @@
 
 #include <string.h>
 
+extern void Vofa_USART1_ErrorNotify(void);
+
 #define SBUS_FRAME_LEN 25U
 #define SBUS_HEADER 0x0FU
 #define SBUS_ONLINE_TIMEOUT_MS 300U
@@ -167,5 +169,9 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
         sbus_online = 0U;
         sbus_swb_was_middle = 0U;
         SBUS_StartReceive();
+    }
+    else if (huart->Instance == USART1)
+    {
+        Vofa_USART1_ErrorNotify();
     }
 }
