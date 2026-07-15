@@ -183,6 +183,26 @@
           <WinNumber>1</WinNumber>
           <ItemText>vofa_roll_deg</ItemText>
         </Ww>
+        <Ww>
+          <count>7</count>
+          <WinNumber>1</WinNumber>
+          <ItemText>Key_Init</ItemText>
+        </Ww>
+        <Ww>
+          <count>8</count>
+          <WinNumber>1</WinNumber>
+          <ItemText>htim1.Instance-&gt;CCR1,0x0A</ItemText>
+        </Ww>
+        <Ww>
+          <count>9</count>
+          <WinNumber>1</WinNumber>
+          <ItemText>htim1.Instance-&gt;CCR3,0x0A</ItemText>
+        </Ww>
+        <Ww>
+          <count>10</count>
+          <WinNumber>1</WinNumber>
+          <ItemText>CCR1</ItemText>
+        </Ww>
       </WatchWindow1>
       <Tracepoint>
         <THDelay>0</THDelay>
@@ -796,8 +816,8 @@
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
       <bDave2>0</bDave2>
-      <PathWithFileName>..\Device\SBUS\sbus.c</PathWithFileName>
-      <FilenameWithoutPath>sbus.c</FilenameWithoutPath>
+      <PathWithFileName>..\Device\WirelessBridge\wireless_bridge.c</PathWithFileName>
+      <FilenameWithoutPath>wireless_bridge.c</FilenameWithoutPath>
       <RteFlg>0</RteFlg>
       <bShared>0</bShared>
     </File>
@@ -808,8 +828,8 @@
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
       <bDave2>0</bDave2>
-      <PathWithFileName>..\Device\SBUS\sbus.h</PathWithFileName>
-      <FilenameWithoutPath>sbus.h</FilenameWithoutPath>
+      <PathWithFileName>..\Device\WirelessBridge\wireless_bridge.h</PathWithFileName>
+      <FilenameWithoutPath>wireless_bridge.h</FilenameWithoutPath>
       <RteFlg>0</RteFlg>
       <bShared>0</bShared>
     </File>

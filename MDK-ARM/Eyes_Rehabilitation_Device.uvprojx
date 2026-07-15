@@ -336,7 +336,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32H723xx,USE_PWR_LDO_SUPPLY</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32H7xx/Include;../Drivers/CMSIS/Include;../Device/BMI088/inc;../Device/BMI088;../Device/HeadTracker;../Device/Key;../Device/Laser;../Device/LED;../Device/Servo;../Device/Voice;../App;../Device/Buzzer;../Device/WS2812;../Device/SBUS</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32H7xx/Include;../Drivers/CMSIS/Include;../Device/BMI088/inc;../Device/BMI088;../Device/HeadTracker;../Device/Key;../Device/Laser;../Device/LED;../Device/Servo;../Device/Voice;../App;../Device/Buzzer;../Device/WS2812;../Device/WirelessBridge</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -816,14 +816,14 @@
               <FilePath>..\Device\WS2812\ws2812.c</FilePath>
             </File>
             <File>
-              <FileName>sbus.c</FileName>
+              <FileName>wireless_bridge.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\Device\SBUS\sbus.c</FilePath>
+              <FilePath>..\Device\WirelessBridge\wireless_bridge.c</FilePath>
             </File>
             <File>
-              <FileName>sbus.h</FileName>
+              <FileName>wireless_bridge.h</FileName>
               <FileType>5</FileType>
-              <FilePath>..\Device\SBUS\sbus.h</FilePath>
+              <FilePath>..\Device\WirelessBridge\wireless_bridge.h</FilePath>
             </File>
           </Files>
         </Group>
